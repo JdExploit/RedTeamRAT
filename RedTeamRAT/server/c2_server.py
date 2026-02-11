@@ -16,7 +16,8 @@ import struct
 from colorama import init, Fore, Back, Style
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
 
 init(autoreset=True)
 
@@ -68,7 +69,7 @@ def decrypt_data(data, key):
 
 def generate_key(password):
     salt = b'redteam_salt_2024'
-    kdf = PBKDF2(
+    kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
