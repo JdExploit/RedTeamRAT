@@ -9,7 +9,7 @@ echo ========================================
 echo.
 
 REM Configurar IP del servidor C2
-set /p C2_IP="Ingresa IP del servidor C2 (Kali): "
+set /p C2_IP="192.168.254.137"
 set C2_PORT=4444
 
 echo.
