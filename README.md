@@ -47,6 +47,7 @@
 | **LSASS Dump** | Extracción de credenciales | ✅ |
 | **Anti-debug** | Ocultación de ventana | ✅ |
 | **Persistencia** | Registro Windows | ✅ |
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/8f801670-d7b1-4cf9-b276-6bc6904316fd" />
 
 ---
 
