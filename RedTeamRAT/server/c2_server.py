@@ -872,15 +872,22 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     }});
                 }}
                 
-                function selectClient(clientId) {{
-                    currentClientId = clientId;
-                    document.getElementById('current-client-label').innerHTML = `(${clients[clientId].hostname} - ${clientId})`;
-                    document.getElementById('terminal-cmd').disabled = false;
-                    document.getElementById('terminal-send').disabled = false;
-                    
-                    addToTerminal(`[+] Connected to client: ${clients[clientId].hostname} (${clientId})`, '#00ff9d');
-                    addToTerminal(`[+] OS: ${clients[clientId].os} | User: ${clients[clientId].username} | Priv: ${clients[clientId].privilege}`, '#8b949e');
-                }}
+                function selectClient(clientId) {
+    currentClientId = clientId;
+    
+    // 🔴 CORREGIDO: Verificar que clients existe y tiene el cliente
+    if (typeof clients !== 'undefined' && clients[clientId]) {
+        document.getElementById('current-client-label').innerHTML = `(${clients[clientId].hostname} - ${clientId})`;
+        addToTerminal(`[+] Connected to client: ${clients[clientId].hostname} (${clientId})`, '#00ff9d');
+        addToTerminal(`[+] OS: ${clients[clientId].os} | User: ${clients[clientId].username} | Priv: ${clients[clientId].privilege}`, '#8b949e');
+    } else {
+        document.getElementById('current-client-label').innerHTML = `(${clientId})`;
+        addToTerminal(`[+] Connected to client: ${clientId}`, '#00ff9d');
+    }
+    
+    document.getElementById('terminal-cmd').disabled = false;
+    document.getElementById('terminal-send').disabled = false;
+}
                 
                 function sendTerminalCommand() {{
                     const cmd = document.getElementById('terminal-cmd').value;
