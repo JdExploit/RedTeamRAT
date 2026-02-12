@@ -27,6 +27,9 @@
 9. [Solución de Problemas](#-solución-de-problemas)
 10. [Legal](#-legal)
 
+<img width="1400" height="759" alt="image" src="https://github.com/user-attachments/assets/635280d4-d44a-44b2-b982-9998f02b74d8" />
+
+
 ---
 
 ## 🎯 **CARACTERÍSTICAS**
