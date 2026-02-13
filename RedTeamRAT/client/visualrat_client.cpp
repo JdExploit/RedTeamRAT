@@ -455,7 +455,7 @@ public:
 class SecureC2 {
 private:
     HCRYPTPROV hProv;
-    HCRYPTPROV hSessionKey;
+    HCRYPTKEY hSessionKey;
     BYTE sessionKey[GCM_256_KEY_SIZE];
     BYTE sessionIV[GCM_256_IV_SIZE];
     SOCKET sock;
