@@ -66,6 +66,9 @@
 #define GCM_256_KEY_SIZE 32
 #define GCM_256_IV_SIZE 12
 #define GCM_256_TAG_SIZE 16
+#ifndef szOID_ECDH_P256
+#define szOID_ECDH_P256 "1.2.840.10045.3.1.7"  // Curva P-256
+#endif
 
 // ============================================================================
 // TYPEDEFS
