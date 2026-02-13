@@ -454,8 +454,8 @@ public:
 // ============================================================================
 class SecureC2 {
 private:
-    HCRYPTPROV hProv;
-    BYTE sessionKey[GCM_256_KEY_SIZE];
+    HCRYPTPROV hSessionKey;
+    BYTE sessionIV[GCM_256_IV_SIZE];
     SOCKET sock;
     bool connected;
     bool useHttps;
