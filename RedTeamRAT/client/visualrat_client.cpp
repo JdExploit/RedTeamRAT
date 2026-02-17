@@ -892,7 +892,7 @@ private:
 class Logger {
 private:
     std::ofstream logFile;
-    std::mutex logMutex;  // <-- AHORA FUNCIONA
+    std::mutex logMutex;
     bool enabled;
     
 public:
@@ -916,7 +916,7 @@ public:
     void Log(const std::string& message) {
         if (!enabled) return;
         
-        std::lock_guard<std::mutex> lock(logMutex);  // <-- AHORA FUNCIONA
+        std::lock_guard<std::mutex> lock(logMutex);
         
         SYSTEMTIME st;
         GetLocalTime(&st);
